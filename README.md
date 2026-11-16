@@ -33,7 +33,7 @@ de dominante de color (por defecto a 0).
 
 ## Instalación
 
-Python 3.10 o superior.
+Python 3.11 o superior (recomendado 3.12).
 
 ```bash
 python -m venv .venv
