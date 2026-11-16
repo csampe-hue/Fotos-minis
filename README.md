@@ -23,8 +23,12 @@ proporciones y detalles finos.
      la línea de apoyo de la peana;
    - el negro "envuelve" ligeramente el contorno, como en una foto real;
    - corrección opcional de la dominante de color de la luz original (medida en el
-     fondo antiguo).
-5. **Encuadre**: centra la figura con el margen y la proporción que elijas
+     fondo antiguo);
+   - **horizonte** opcional: paso visible del suelo a la pared del fondo. Su altura se
+     calcula con la perspectiva de la peana (una peana redonda vista desde arriba es una
+     elipse, cuya proporción da la inclinación de la cámara) y la línea se desenfoca más
+     cuanto más lejos está la pared.
+5. **Encuadre**: centra la figura en horizontal y en vertical, con el margen y la proporción que elijas
    **sin reescalarla**.
 
 **Garantía de fidelidad:** los píxeles opacos del sujeto se copian bit a bit del
@@ -51,7 +55,8 @@ Memoria: el modo combinado (por defecto) necesita unos **9 GB de RAM** en CPU
 
 Haz doble clic en **`Iniciar Fotos Minis.command`**. La primera vez prepara el entorno
 (instala uv, Python 3.12 y las librerías; tarda unos minutos) y después arranca la
-aplicación y abre el navegador. Para cerrarla, cierra la ventana de Terminal.
+aplicación y abre el navegador. Para cerrarla, pulsa **Cerrar aplicación** al final de la
+página (o cierra la ventana de Terminal).
 
 Si macOS lo bloquea por ser de un «desarrollador no identificado», haz clic derecho
 sobre el fichero → **Abrir** → **Abrir** (sólo hace falta la primera vez).

@@ -59,3 +59,5 @@ for _ in $(seq 1 180); do
 done
 
 wait $PID
+echo
+echo "Fotos Minis se ha cerrado. Ya puedes cerrar esta ventana."

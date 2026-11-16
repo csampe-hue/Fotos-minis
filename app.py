@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import signal
+import threading
 import tempfile
 import zipfile
 from pathlib import Path
@@ -79,6 +82,23 @@ def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
     return str(zip_path)
 
 
+def cerrar_aplicacion():
+    """Detiene el servidor de forma ordenada: equivale a pulsar Ctrl + C en la terminal
+    (Gradio cierra el servidor y el programa termina). Se hace con un pequeño retraso
+    para que el navegador reciba antes la respuesta."""
+    threading.Timer(0.8, lambda: os.kill(os.getpid(), signal.SIGINT)).start()
+    return gr.update(value="Cerrando…", interactive=False)
+
+
+AVISO_CIERRE = """() => {
+    setTimeout(() => {
+        document.body.innerHTML = '<div style="font-family:sans-serif;max-width:32rem;margin:20vh auto;'
+            + 'text-align:center;color:#333"><h2>Fotos Minis se ha cerrado</h2>'
+            + '<p>Ya puedes cerrar esta pestaña. Para volver a usarla, abre de nuevo el lanzador.</p></div>';
+    }, 1500);
+}"""
+
+
 with gr.Blocks(title="Fotos Minis · Fondo negro de estudio") as demo:
     gr.Markdown(
         "# Fotos Minis · Fondo negro de estudio\n"
@@ -130,6 +150,10 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio") as demo:
         boton_lote = gr.Button("Procesar lote con los ajustes actuales")
         zip_salida = gr.File(label="ZIP con los resultados")
 
+    with gr.Row():
+        gr.Markdown("Al terminar, cierra la aplicación con este botón (libera la memoria de los modelos).")
+        boton_cerrar = gr.Button("Cerrar aplicación", variant="stop", scale=0, min_width=200)
+
     ajustes = [halo, vineteado, sombra, reflejo, caida, oscurecer, dominante, negro, reencuadrar,
                margen, proporcion, descontaminar, horizonte, h_distancia, h_desenfoque, h_suelo, h_altura]
     entradas = [entrada, modelo, huecos, *ajustes]
@@ -139,8 +163,12 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio") as demo:
     for c in [*ajustes, modelo, huecos]:
         c.release(procesar_una, entradas, salidas) if isinstance(c, gr.Slider) \
             else c.change(procesar_una, entradas, salidas)
+    boton_cerrar.click(cerrar_aplicacion, None, boton_cerrar, js=AVISO_CIERRE, queue=False)
     boton_lote.click(procesar_lote, [lote, modelo, huecos, *ajustes], zip_salida)
 
 
 if __name__ == "__main__":
+    # Si se arranca en segundo plano (p. ej. desde el lanzador), el shell hace que
+    # se ignore Ctrl + C; se restaura para que el botón "Cerrar aplicación" funcione.
+    signal.signal(signal.SIGINT, signal.default_int_handler)
     demo.queue(default_concurrency_limit=1).launch()
