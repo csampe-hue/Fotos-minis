@@ -96,6 +96,26 @@ r.estudio.save("mini_estudio.png")
 r.recorte.save("mini_recorte.png")   # RGBA
 ```
 
+## Perfiles de ajustes
+
+En la pestaña **Perfiles** del panel puedes guardar todos los ajustes actuales con un
+nombre (p. ej. «Instagram cuadrado con horizonte») y volver a aplicarlos cuando quieras.
+Uno de ellos puede marcarse con **Usar al abrir**: sus valores se cargan cada vez que
+abres la aplicación. «Valores de fábrica» devuelve todo a los valores originales.
+
+Los perfiles se guardan en `~/.fotos-minis/perfiles.json`, fuera de la carpeta del
+programa, así que se conservan al actualizar la aplicación.
+
+Desde la línea de comandos se usa por defecto el mismo perfil «al abrir»; también puedes
+elegir otro con `--perfil "Nombre"` y ver la lista con `--perfiles`. Cualquier opción
+que escribas (p. ej. `--proporcion 1:1`) prevalece sobre el perfil.
+
+## Apariencia
+
+En la cabecera puedes elegir **Sistema** (sigue el modo claro/oscuro de tu ordenador),
+**Diurno** o **Nocturno**. La elección se recuerda para las siguientes aperturas
+(`~/.fotos-minis/preferencias.json`).
+
 ## Formatos
 
 Acepta JPG, PNG, WebP, TIFF y **HEIC/HEIF** (fotos de iPhone). El perfil de color de la

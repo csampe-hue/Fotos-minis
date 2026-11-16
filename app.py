@@ -16,6 +16,8 @@ from PIL import Image
 
 from fotos_minis.composicion import (PROPORCIONES, OpcionesEstudio, _pegar, calcular_lienzo, componer,
                                      descontaminar as limpiar_primer_plano)
+from fotos_minis import perfiles, preferencias
+from fotos_minis.perfiles import CAMPOS_ESTUDIO, FABRICA
 from fotos_minis.proceso import cargar, guardar, procesar
 from fotos_minis.segmentacion import MODELO_POR_DEFECTO, MODELOS, mascara_bruta, refinar_mascara
 
@@ -39,21 +41,24 @@ def _mascara(arr: np.ndarray, modelo: str, huecos: int) -> tuple[np.ndarray, np.
     return _cache_mascaras[k]
 
 
-def _opciones(halo, vineteado, sombra, reflejo, caida, oscurecer, dominante, negro, reencuadrar,
-              margen, proporcion, descontaminar, horizonte, h_distancia, h_desenfoque,
-              h_suelo, h_altura) -> OpcionesEstudio:
-    return OpcionesEstudio(halo=halo, vineteado=vineteado, sombra=sombra, reflejo=reflejo,
-                           reflejo_caida=caida, oscurecer_borde=oscurecer,
-                           corregir_dominante=dominante, negro=int(negro), reencuadrar=reencuadrar,
-                           margen=margen, proporcion=proporcion, descontaminar_bordes=descontaminar,
-                           horizonte=horizonte, horizonte_distancia=h_distancia,
-                           horizonte_desenfoque=h_desenfoque, horizonte_suelo=h_suelo,
-                           horizonte_altura=h_altura)
+def _opciones(*ajustes) -> OpcionesEstudio:
+    """Ajustes de la interfaz (en el orden de CAMPOS_ESTUDIO) -> OpcionesEstudio."""
+    return perfiles.a_opciones(dict(zip(CAMPOS_ESTUDIO, ajustes)))[0]
+
+
+_ultima_firma: tuple | None = None
 
 
 def procesar_una(ruta, modelo, huecos, *ajustes):
+    global _ultima_firma
     if ruta is None:
+        _ultima_firma = None
         return None, None, None
+    # Al aplicar un perfil cambian muchos controles a la vez y cada uno lanza un
+    # evento: si los valores son los mismos que los del último resultado, no se repite.
+    firma = (ruta, modelo, huecos, *ajustes)
+    if firma == _ultima_firma:
+        return gr.skip(), gr.skip(), gr.skip()
     img = cargar(ruta)
     arr = np.asarray(img)
     alfa, primer_plano = _mascara(arr, modelo, huecos)
@@ -68,7 +73,64 @@ def procesar_una(ruta, modelo, huecos, *ajustes):
     resultado.info.update(img.info)
     guardar(resultado, destino)
     mascara = Image.fromarray(np.round(alfa * 255).astype(np.uint8))
+    _ultima_firma = firma
     return (Image.fromarray(antes), Image.fromarray(out)), mascara, str(destino)
+
+
+# --------------------------------------------------------------------------- #
+# Perfiles
+# --------------------------------------------------------------------------- #
+
+def _opciones_perfil(seleccion: str | None = None):
+    return gr.update(choices=[FABRICA, *perfiles.listar()], value=seleccion)
+
+
+def _estado_perfiles(mensaje: str = "") -> str:
+    texto = f"Al abrir se aplica: **{perfiles.predeterminado()}**"
+    return f"{mensaje}\n\n{texto}" if mensaje else texto
+
+
+def _valores_controles(valores: dict) -> list:
+    return [valores[k] for k in perfiles.CAMPOS]
+
+
+def al_abrir():
+    """Al cargar la página se aplican los ajustes del perfil predeterminado."""
+    nombre = perfiles.predeterminado()
+    return [*_valores_controles(perfiles.obtener(nombre)), _opciones_perfil(nombre),
+            _estado_perfiles(), preferencias.apariencia()]
+
+
+def guardar_apariencia(modo):
+    preferencias.fijar_apariencia(modo)
+
+
+def aplicar_perfil(nombre):
+    try:
+        valores = perfiles.obtener(nombre)
+    except KeyError as e:
+        raise gr.Error(str(e))
+    return [*_valores_controles(valores), _estado_perfiles(f"Aplicado «{nombre or FABRICA}».")]
+
+
+def guardar_perfil(nombre, al_abrir_tambien, *controles):
+    try:
+        nombre = perfiles.guardar(nombre, dict(zip(perfiles.CAMPOS, controles)), al_abrir_tambien)
+    except ValueError as e:
+        raise gr.Error(str(e))
+    return _opciones_perfil(nombre), "", _estado_perfiles(f"Guardado «{nombre}».")
+
+
+def usar_al_abrir(nombre):
+    perfiles.fijar_predeterminado(nombre)
+    return _estado_perfiles(f"«{nombre or FABRICA}» se aplicará al abrir la aplicación.")
+
+
+def borrar_perfil(nombre):
+    if not nombre or nombre == FABRICA:
+        raise gr.Error("Los valores de fábrica no se pueden borrar.")
+    perfiles.borrar(nombre)
+    return _opciones_perfil(FABRICA), _estado_perfiles(f"Borrado «{nombre}».")
 
 
 def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
@@ -103,6 +165,20 @@ AVISO_CIERRE = """() => {
 }"""
 
 
+# Aplica la apariencia en el navegador. Gradio usa la clase "dark" en <body>. En
+# modo "sistema" sigue además los cambios del sistema operativo en caliente.
+APLICAR_APARIENCIA = """(modo) => {
+    const medio = window.matchMedia('(prefers-color-scheme: dark)');
+    window.__fmModo = modo;
+    const aplicar = () => {
+        const m = window.__fmModo;
+        document.body.classList.toggle('dark', m === 'nocturno' || (m === 'sistema' && medio.matches));
+    };
+    if (!window.__fmEscucha) { medio.addEventListener('change', aplicar); window.__fmEscucha = true; }
+    aplicar();
+    return modo;
+}"""
+
 CSS = """
 .gradio-container { max-width: 100% !important; padding: 10px 20px 16px !important; }
 #cabecera { align-items: center; gap: 12px; }
@@ -113,6 +189,11 @@ CSS = """
 #panel { position: sticky; top: 8px; max-height: calc(100vh - 150px); overflow-y: auto;
          overflow-x: hidden; padding-right: 4px; flex-wrap: nowrap !important; }
 #panel > * { flex-shrink: 0; }
+/* Pestañas del panel compactas, para que quepan las cinco sin menú "⋯". */
+#panel .tab-wrapper button { padding: 6px 8px !important; font-size: 13px !important; }
+#apariencia { width: 330px !important; min-width: 330px !important; flex: none !important; }
+#apariencia .wrap { flex-wrap: nowrap; gap: 6px; }
+#apariencia label { padding: 6px 10px !important; white-space: nowrap; }
 #visor-tabs .tabitem { padding: 0 !important; }
 #comparador, #mascara { height: calc(100vh - 260px) !important; min-height: 360px; }
 /* Las imágenes ocupan todo el alto disponible del visor, sin deformarse. */
@@ -120,6 +201,8 @@ CSS = """
 #mascara .image-container, #mascara img { height: 100% !important; max-height: none !important; }
 #comparador img, #mascara img { width: 100% !important; object-fit: contain; }
 @media (max-width: 960px) {
+  #cabecera { flex-wrap: wrap !important; }
+  #titulo { flex: 1 1 100% !important; min-width: 100% !important; }
   #panel { position: static; max-height: none; overflow: visible; }
   #comparador, #mascara { height: 70vh !important; }
 }
@@ -129,7 +212,11 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
     with gr.Row(elem_id="cabecera", equal_height=True):
         gr.Markdown(
             "# Fotos Minis · Fondo negro de estudio\n"
-            "Sustituye el fondo por un negro de estudio conservando intactos la figura y la peana.")
+            "Sustituye el fondo por un negro de estudio conservando intactos la figura y la peana.",
+            elem_id="titulo")
+        apariencia = gr.Radio([(v, k) for k, v in preferencias.APARIENCIAS.items()],
+                              value="sistema", label="Apariencia", scale=0, min_width=320,
+                              elem_id="apariencia", container=False)
         boton_cerrar = gr.Button("Cerrar aplicación", variant="stop", scale=0, min_width=180,
                                  elem_id="boton-cerrar")
 
@@ -142,6 +229,19 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                                        sources=["upload", "clipboard"])
                     boton = gr.Button("Volver a procesar", variant="primary", size="sm")
                     with gr.Tabs():
+                        with gr.Tab("Perfiles", id="perfiles"):
+                            perfil = gr.Dropdown([FABRICA, *perfiles.listar()], value=FABRICA,
+                                                 label="Perfil guardado", interactive=True)
+                            with gr.Row():
+                                b_aplicar = gr.Button("Aplicar", variant="primary", size="sm", min_width=60)
+                                b_al_abrir = gr.Button("Usar al abrir", size="sm", min_width=60)
+                                b_borrar = gr.Button("Borrar", variant="stop", size="sm", min_width=60)
+                            gr.Markdown("---")
+                            nombre_perfil = gr.Textbox(label="Guardar los ajustes actuales como…",
+                                                       placeholder="p. ej. Peanas de arena con horizonte")
+                            con_al_abrir = gr.Checkbox(True, label="Usar este perfil al abrir la aplicación")
+                            b_guardar = gr.Button("Guardar perfil", size="sm")
+                            estado_perfiles = gr.Markdown()
                         with gr.Tab("Recorte", id="recorte"):
                             modelo = gr.Dropdown([(v, k) for k, v in MODELOS.items()],
                                                  value=MODELO_POR_DEFECTO, label="Modelo de segmentación")
@@ -203,6 +303,18 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
     # también reacciona cuando se escribe el número en la casilla.
     for c in [*ajustes, modelo, huecos]:
         c.change(procesar_una, entradas, salidas, trigger_mode="always_last", show_progress="minimal")
+    controles = [modelo, huecos, *ajustes]  # mismo orden que perfiles.CAMPOS
+    demo.load(al_abrir, None, [*controles, perfil, estado_perfiles, apariencia]) \
+        .then(None, apariencia, None, js=APLICAR_APARIENCIA)
+    apariencia.input(guardar_apariencia, apariencia, None, js=APLICAR_APARIENCIA, queue=False)
+    b_aplicar.click(aplicar_perfil, perfil, [*controles, estado_perfiles]) \
+        .then(procesar_una, entradas, salidas)
+    b_guardar.click(guardar_perfil, [nombre_perfil, con_al_abrir, *controles],
+                    [perfil, nombre_perfil, estado_perfiles])
+    nombre_perfil.submit(guardar_perfil, [nombre_perfil, con_al_abrir, *controles],
+                         [perfil, nombre_perfil, estado_perfiles])
+    b_al_abrir.click(usar_al_abrir, perfil, estado_perfiles)
+    b_borrar.click(borrar_perfil, perfil, [perfil, estado_perfiles])
     boton_cerrar.click(cerrar_aplicacion, None, boton_cerrar, js=AVISO_CIERRE, queue=False)
     boton_lote.click(procesar_lote, [lote, modelo, huecos, *ajustes], zip_salida)
 
