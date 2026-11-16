@@ -6,9 +6,11 @@ proporciones y detalles finos.
 
 ## Qué hace
 
-1. **Segmentación** del sujeto con IA (BiRefNet por defecto, ISNet como alternativa
-   rápida), vía [rembg](https://github.com/danielgatis/rembg). Los modelos se
-   descargan solos la primera vez.
+1. **Segmentación** del sujeto con IA vía [rembg](https://github.com/danielgatis/rembg).
+   Por defecto se combinan dos modelos (BiRefNet + ISNet): en pruebas con fotos reales,
+   BiRefNet llegó a descartar una peana de arena gris sobre un tapete gris, e ISNet
+   la recuperaba; la unión de ambos acierta en todos los casos probados. Los modelos
+   se descargan solos la primera vez.
 2. **Refinado de la máscara**: elimina motas del fondo, puede rellenar huecos pequeños
    y ajusta el contorno a los bordes reales de la foto con un filtro guiado (lanzas,
    pelo, capas, filo de la peana).
@@ -39,8 +41,8 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Memoria: BiRefNet necesita unos **8 GB de RAM** en CPU (≈20 s por foto). Si tu equipo
-tiene menos, elige ISNet (≈1 GB, ≈2 s por foto). Con GPU NVIDIA instala
+Memoria: el modo combinado (por defecto) necesita unos **9 GB de RAM** en CPU
+(≈25 s por foto). Si tu equipo tiene menos, elige ISNet (≈1 GB, ≈2 s por foto). Con GPU NVIDIA instala
 `rembg[gpu]` en lugar de `rembg[cpu]`.
 
 ## Uso

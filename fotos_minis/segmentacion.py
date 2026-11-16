@@ -9,15 +9,21 @@ import numpy as np
 from PIL import Image
 
 MODELOS = {
+    "combinado": "Combinado BiRefNet + ISNet (recomendado)",
     "birefnet-general": "BiRefNet (máxima calidad en detalles finos, más lento)",
     "isnet-general-use": "ISNet (rápido, buena calidad)",
     "birefnet-general-lite": "BiRefNet lite (intermedio)",
     "u2net": "U²-Net (clásico, ligero)",
 }
-MODELO_POR_DEFECTO = "birefnet-general"
+MODELO_POR_DEFECTO = "combinado"
+# Modelos que forman el modo combinado. Cada uno falla en casos distintos: BiRefNet
+# puede tomar una peana gris sobre tapete gris por fondo; ISNet es más tosco en el
+# contorno. La unión conserva lo que cualquiera de los dos reconoce como sujeto y
+# el refinado posterior elimina las motas sueltas.
+_COMBINADO = ("birefnet-general", "isnet-general-use")
 
 
-@lru_cache(maxsize=1)  # un único modelo en memoria (BiRefNet ocupa ~8 GB en CPU)
+@lru_cache(maxsize=2)  # BiRefNet ocupa ~8 GB en CPU; ISNet ~1 GB
 def _sesion(modelo: str):
     import onnxruntime as ort
     from rembg import new_session
@@ -30,6 +36,9 @@ def _sesion(modelo: str):
 def mascara_bruta(imagen: Image.Image, modelo: str = MODELO_POR_DEFECTO) -> np.ndarray:
     """Devuelve la máscara del modelo como float32 en [0, 1] al tamaño de la imagen."""
     from rembg import remove
+
+    if modelo == "combinado":
+        return np.maximum.reduce([mascara_bruta(imagen, m) for m in _COMBINADO])
 
     m = remove(imagen.convert("RGB"), session=_sesion(modelo), only_mask=True,
                post_process_mask=False)
