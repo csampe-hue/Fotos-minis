@@ -190,35 +190,6 @@ APLICAR_APARIENCIA = """(modo) => {
     return modo;
 }"""
 
-# Si ya hay una foto cargada, Gradio oculta su zona de soltar: al arrastrar otra
-# encima borra la actual y no recibe la nueva. Se intercepta el arrastre sobre la
-# foto y se entrega el fichero al selector de ficheros del componente, que la sustituye.
-SUSTITUIR_AL_SOLTAR = """() => {
-    if (window.__fmSoltar) return;
-    window.__fmSoltar = true;
-    const conFoto = (e) => {
-        const caja = e.target.closest && e.target.closest('#entrada');
-        return caja && caja.querySelector('.image-frame img') ? caja : null;
-    };
-    const bloquear = (e) => {
-        if (!conFoto(e)) return;
-        e.preventDefault(); e.stopPropagation();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-    };
-    for (const t of ['dragenter', 'dragover', 'dragleave']) document.addEventListener(t, bloquear, true);
-    document.addEventListener('drop', (e) => {
-        const caja = conFoto(e);
-        if (!caja) return;
-        e.preventDefault(); e.stopPropagation();
-        const f = [...(e.dataTransfer?.files || [])][0];
-        const input = caja.querySelector('input[type=file]');
-        if (!f || !input) return;
-        const dt = new DataTransfer(); dt.items.add(f);
-        input.files = dt.files;
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-    }, true);
-}"""
-
 CSS = """
 .gradio-container { max-width: 100% !important; padding: 10px 20px 16px !important; }
 #cabecera { align-items: center; gap: 12px; }
@@ -229,6 +200,16 @@ CSS = """
 #panel { position: sticky; top: 8px; max-height: calc(100vh - 150px); overflow-y: auto;
          overflow-x: hidden; padding-right: 4px; flex-wrap: nowrap !important; }
 #panel > * { flex-shrink: 0; }
+/* Con una foto cargada Gradio oculta su zona de soltar y, al arrastrar otra encima,
+   algunos navegadores (Safari) la vacían sin recoger la nueva. La zona de soltar se
+   mantiene activa como una capa invisible sobre la foto: soltar otra la sustituye por
+   el mismo camino que la primera vez, y un clic abre el selector de ficheros. */
+#entrada .upload-container { position: relative; }
+#entrada button.upload-container.hidden {
+  display: flex !important; position: absolute !important; inset: 0 !important;
+  width: 100% !important; height: 100% !important; opacity: 0 !important; z-index: 5;
+}
+#entrada .top-panel { z-index: 10; }
 /* Pestañas del panel compactas, para que quepan las cinco sin menú "⋯". */
 #panel .tab-wrapper button { padding: 6px 8px !important; font-size: 13px !important; }
 #apariencia { width: 330px !important; min-width: 330px !important; flex: none !important; }
@@ -265,7 +246,7 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
             with gr.Row(equal_height=False):
                 # ---------------- Panel de ajustes ----------------
                 with gr.Column(scale=1, min_width=330, elem_id="panel"):
-                    entrada = gr.Image(label="Foto original", type="filepath", height=210, elem_id="entrada",
+                    entrada = gr.Image(label="Foto original (suelta otra encima para cambiarla)", type="filepath", height=210, elem_id="entrada",
                                        sources=["upload", "clipboard"])
                     boton = gr.Button("Volver a procesar", variant="primary", size="sm")
                     with gr.Tabs():
@@ -345,7 +326,6 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
     for c in [*ajustes, modelo, huecos]:
         c.change(procesar_una, entradas, salidas, trigger_mode="always_last", show_progress="minimal")
     controles = [modelo, huecos, *ajustes]  # mismo orden que perfiles.CAMPOS
-    demo.load(None, None, None, js=SUSTITUIR_AL_SOLTAR)
     demo.load(al_abrir, None, [*controles, perfil, estado_perfiles, apariencia]) \
         .then(None, apariencia, None, js=APLICAR_APARIENCIA)
     apariencia.input(guardar_apariencia, apariencia, None, js=APLICAR_APARIENCIA, queue=False)
