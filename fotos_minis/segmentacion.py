@@ -163,6 +163,15 @@ def refinar_mascara(
         t = np.clip((alfa - lo) / (hi - lo), 0.0, 1.0)
         alfa = (t * t * (3 - 2 * t)).astype(np.float32)
 
+    # La figura es opaca: todo lo que queda claramente dentro de la silueta pasa a 1.
+    # Los modelos a veces dejan zonas interiores semitransparentes (p. ej. una peana
+    # oscura sobre un tapete oscuro), que sobre negro se verían más apagadas.
+    # La transición suave sólo se conserva en una franja junto al contorno.
+    r = max(2, int(round(max(h, w) * 0.004)))
+    interior = cv2.erode((alfa > 0.5).astype(np.uint8),
+                         cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0
+    alfa[interior] = 1.0
+
     # El núcleo sólido del sujeto queda exactamente a 1 (sin cambios en sus píxeles).
     nucleo = cv2.erode((alfa > 0.9).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
     alfa[nucleo] = 1.0

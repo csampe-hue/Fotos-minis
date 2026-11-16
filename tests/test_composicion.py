@@ -96,3 +96,11 @@ def test_horizonte_coherente_con_la_perspectiva():
     assert s2 > s1                        # más lejos -> más desenfocada
     out = componer(*_escena(), OpcionesEstudio(horizonte=1, reencuadrar=False, vineteado=0))
     assert out[5, 5].sum() < out[-5, 5].sum()  # pared más oscura que el suelo
+
+
+def test_interior_semitransparente_se_vuelve_opaco():
+    img, alfa = _escena()
+    alfa[alfa > 0] = 0.7  # el modelo duda en todo el sujeto
+    r = refinar_mascara(img, alfa, refinar_bordes=False)
+    assert r[100:200, 100:140].min() == 1.0   # interior opaco
+    assert r[0:5, 0:5].max() == 0.0           # el fondo sigue siendo fondo

@@ -281,11 +281,20 @@ def _pegar(dst: np.ndarray, src: np.ndarray, ox: int, oy: int) -> None:
 # Composición final
 # --------------------------------------------------------------------------- #
 
-def componer(imagen: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio) -> np.ndarray:
-    """Compone el sujeto sobre el fondo de estudio. Devuelve uint8 RGB."""
+def componer(imagen: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio,
+             primer_plano: np.ndarray | None = None) -> np.ndarray:
+    """Compone el sujeto sobre el fondo de estudio. Devuelve uint8 RGB.
+
+    ``primer_plano`` permite reutilizar el resultado de :func:`descontaminar` (la
+    parte lenta) cuando sólo cambian los ajustes del fondo.
+    """
     alfa = alfa.astype(np.float32)
-    frg = descontaminar(imagen, alfa) if op.descontaminar_bordes \
-        else imagen.astype(np.float32) / 255.0
+    if not op.descontaminar_bordes:
+        frg = imagen.astype(np.float32) / 255.0
+    elif primer_plano is not None:
+        frg = primer_plano
+    else:
+        frg = descontaminar(imagen, alfa)
     frg = corregir_luz(frg, imagen, alfa, op.corregir_dominante)
 
     ox, oy, W, H = calcular_lienzo(alfa, op)

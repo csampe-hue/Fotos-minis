@@ -14,24 +14,28 @@ import gradio as gr
 import numpy as np
 from PIL import Image
 
-from fotos_minis.composicion import PROPORCIONES, OpcionesEstudio, _pegar, calcular_lienzo, componer
+from fotos_minis.composicion import (PROPORCIONES, OpcionesEstudio, _pegar, calcular_lienzo, componer,
+                                     descontaminar as limpiar_primer_plano)
 from fotos_minis.proceso import cargar, guardar, procesar
 from fotos_minis.segmentacion import MODELO_POR_DEFECTO, MODELOS, mascara_bruta, refinar_mascara
 
-_cache_mascaras: dict[str, np.ndarray] = {}
+_cache_mascaras: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 
 
 def _clave(arr: np.ndarray, modelo: str, huecos: int) -> str:
     return hashlib.sha1(arr.tobytes()).hexdigest() + f"|{modelo}|{huecos}"
 
 
-def _mascara(arr: np.ndarray, modelo: str, huecos: int) -> np.ndarray:
+def _mascara(arr: np.ndarray, modelo: str, huecos: int) -> tuple[np.ndarray, np.ndarray]:
     k = _clave(arr, modelo, huecos)
     if k not in _cache_mascaras:
         if len(_cache_mascaras) > 8:
             _cache_mascaras.clear()
         alfa = mascara_bruta(Image.fromarray(arr), modelo)
-        _cache_mascaras[k] = refinar_mascara(arr, alfa, rellenar_huecos_px=int(huecos))
+        alfa = refinar_mascara(arr, alfa, rellenar_huecos_px=int(huecos))
+        # El primer plano limpio (lento) se calcula una vez por máscara: así mover los
+        # controles de luz, horizonte o encuadre sólo recompone el fondo.
+        _cache_mascaras[k] = (alfa, limpiar_primer_plano(arr, alfa))
     return _cache_mascaras[k]
 
 
@@ -52,9 +56,9 @@ def procesar_una(ruta, modelo, huecos, *ajustes):
         return None, None, None
     img = cargar(ruta)
     arr = np.asarray(img)
-    alfa = _mascara(arr, modelo, huecos)
+    alfa, primer_plano = _mascara(arr, modelo, huecos)
     op = _opciones(*ajustes)
-    out = componer(arr, alfa, op)
+    out = componer(arr, alfa, op, primer_plano)
     # "Antes" con el mismo encuadre que el resultado, para que el comparador coincida.
     ox, oy, W, H = calcular_lienzo(alfa, op)
     antes = np.zeros((H, W, 3), np.uint8)
@@ -99,60 +103,95 @@ AVISO_CIERRE = """() => {
 }"""
 
 
-with gr.Blocks(title="Fotos Minis · Fondo negro de estudio") as demo:
-    gr.Markdown(
-        "# Fotos Minis · Fondo negro de estudio\n"
-        "Sube la foto de tu figura: se sustituye el fondo por un negro de estudio "
-        "conservando intactos la figura y la peana. Ajusta el acabado con los controles.")
-    with gr.Row():
-        with gr.Column(scale=1):
-            entrada = gr.Image(label="Foto original", type="filepath", sources=["upload", "clipboard"])
-            with gr.Accordion("Recorte", open=True):
-                modelo = gr.Dropdown([(v, k) for k, v in MODELOS.items()], value=MODELO_POR_DEFECTO,
-                                     label="Modelo de segmentación")
-                huecos = gr.Slider(0, 5000, 0, step=50, label="Rellenar huecos pequeños de la máscara (px)",
-                                   info="Úsalo si aparecen agujeros en zonas oscuras de la figura")
-                descontaminar = gr.Checkbox(True, label="Limpiar el color del fondo antiguo en el contorno")
-            with gr.Accordion("Luz y sombras", open=True):
-                halo = gr.Slider(0, 1, 0.10, step=0.01, label="Foco suave detrás de la figura")
-                vineteado = gr.Slider(0, 1, 0.35, step=0.01, label="Viñeteado")
-                sombra = gr.Slider(0, 1, 0.6, step=0.01, label="Sombra de contacto bajo la peana")
-                reflejo = gr.Slider(0, 1, 0.0, step=0.01, label="Reflejo en suelo negro brillante")
-                caida = gr.Slider(0.05, 0.6, 0.25, step=0.01, label="Longitud del reflejo")
-                oscurecer = gr.Slider(0, 0.6, 0.15, step=0.01, label="Integración del borde con el negro")
-                dominante = gr.Slider(0, 1, 0.0, step=0.01, label="Corregir dominante de color de la luz",
-                                      info="0 = colores originales intactos")
-                negro = gr.Slider(0, 40, 0, step=1, label="Nivel del negro de fondo")
-            with gr.Accordion("Horizonte (paso del suelo a la pared)", open=False):
-                gr.Markdown("La línea se sitúa según la perspectiva de la peana y se desenfoca "
-                            "más cuanto más lejos queda la pared.")
-                horizonte = gr.Slider(0, 1, 0.0, step=0.01, label="Intensidad del horizonte",
-                                      info="0 = fondo negro continuo, sin horizonte")
-                h_distancia = gr.Slider(0.5, 10, 3.0, step=0.1, label="Distancia de la pared",
-                                        info="En diámetros de peana detrás de la figura")
-                h_desenfoque = gr.Slider(0, 3, 0.5, step=0.05, label="Desenfoque de la línea")
-                h_suelo = gr.Slider(0, 1, 0.5, step=0.01, label="Luminosidad del suelo")
-                h_altura = gr.Slider(-0.5, 0.5, 0.0, step=0.01, label="Ajuste fino de la altura",
-                                     info="Corrige la posición si la perspectiva estimada no convence")
-            with gr.Accordion("Encuadre", open=False):
-                reencuadrar = gr.Checkbox(True, label="Reencuadrar centrando la figura en horizontal y vertical (sin reescalarla)")
-                margen = gr.Slider(0, 0.5, 0.12, step=0.01, label="Margen")
-                proporcion = gr.Dropdown(["original", *PROPORCIONES], value="original", label="Proporción")
-            boton = gr.Button("Procesar", variant="primary")
-        with gr.Column(scale=2):
-            comparador = gr.ImageSlider(label="Antes / después", type="pil")
-            with gr.Row():
-                descarga = gr.File(label="Descargar (PNG sin pérdida)")
-                mascara = gr.Image(label="Máscara", type="pil", height=200)
+CSS = """
+.gradio-container { max-width: 100% !important; padding: 10px 20px 16px !important; }
+#cabecera { align-items: center; gap: 12px; }
+#cabecera h1 { margin: 0 0 2px; font-size: 1.45rem; }
+#cabecera p { margin: 0; opacity: .75; }
+#boton-cerrar { align-self: center; }
+/* Panel de ajustes: ocupa la altura de la ventana y se desplaza por su cuenta. */
+#panel { position: sticky; top: 8px; max-height: calc(100vh - 150px); overflow-y: auto;
+         overflow-x: hidden; padding-right: 4px; flex-wrap: nowrap !important; }
+#panel > * { flex-shrink: 0; }
+#visor-tabs .tabitem { padding: 0 !important; }
+#comparador, #mascara { height: calc(100vh - 260px) !important; min-height: 360px; }
+/* Las imágenes ocupan todo el alto disponible del visor, sin deformarse. */
+#comparador .content, #comparador .content img,
+#mascara .image-container, #mascara img { height: 100% !important; max-height: none !important; }
+#comparador img, #mascara img { width: 100% !important; object-fit: contain; }
+@media (max-width: 960px) {
+  #panel { position: static; max-height: none; overflow: visible; }
+  #comparador, #mascara { height: 70vh !important; }
+}
+"""
 
-    with gr.Accordion("Procesar varias fotos a la vez", open=False):
-        lote = gr.File(file_count="multiple", file_types=["image", ".heic", ".heif"], label="Fotos")
-        boton_lote = gr.Button("Procesar lote con los ajustes actuales")
-        zip_salida = gr.File(label="ZIP con los resultados")
+with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) as demo:
+    with gr.Row(elem_id="cabecera", equal_height=True):
+        gr.Markdown(
+            "# Fotos Minis · Fondo negro de estudio\n"
+            "Sustituye el fondo por un negro de estudio conservando intactos la figura y la peana.")
+        boton_cerrar = gr.Button("Cerrar aplicación", variant="stop", scale=0, min_width=180,
+                                 elem_id="boton-cerrar")
 
-    with gr.Row():
-        gr.Markdown("Al terminar, cierra la aplicación con este botón (libera la memoria de los modelos).")
-        boton_cerrar = gr.Button("Cerrar aplicación", variant="stop", scale=0, min_width=200)
+    with gr.Tabs():
+        with gr.Tab("Una foto", id="una"):
+            with gr.Row(equal_height=False):
+                # ---------------- Panel de ajustes ----------------
+                with gr.Column(scale=1, min_width=330, elem_id="panel"):
+                    entrada = gr.Image(label="Foto original", type="filepath", height=210,
+                                       sources=["upload", "clipboard"])
+                    boton = gr.Button("Volver a procesar", variant="primary", size="sm")
+                    with gr.Tabs():
+                        with gr.Tab("Recorte", id="recorte"):
+                            modelo = gr.Dropdown([(v, k) for k, v in MODELOS.items()],
+                                                 value=MODELO_POR_DEFECTO, label="Modelo de segmentación")
+                            huecos = gr.Slider(0, 5000, 0, step=50, label="Rellenar huecos de la máscara (px)",
+                                               info="Si aparecen agujeros en zonas oscuras de la figura")
+                            descontaminar = gr.Checkbox(True, label="Limpiar el color del fondo antiguo en el contorno")
+                        with gr.Tab("Luz", id="luz"):
+                            halo = gr.Slider(0, 1, 0.10, step=0.01, label="Foco suave detrás de la figura")
+                            vineteado = gr.Slider(0, 1, 0.35, step=0.01, label="Viñeteado")
+                            sombra = gr.Slider(0, 1, 0.6, step=0.01, label="Sombra de contacto bajo la peana")
+                            reflejo = gr.Slider(0, 1, 0.0, step=0.01, label="Reflejo en suelo negro brillante")
+                            caida = gr.Slider(0.05, 0.6, 0.25, step=0.01, label="Longitud del reflejo")
+                            oscurecer = gr.Slider(0, 0.6, 0.15, step=0.01, label="Integración del borde con el negro")
+                            dominante = gr.Slider(0, 1, 0.0, step=0.01, label="Corregir dominante de color",
+                                                  info="0 = colores originales intactos")
+                            negro = gr.Slider(0, 40, 0, step=1, label="Nivel del negro de fondo")
+                        with gr.Tab("Horizonte", id="horizonte"):
+                            gr.Markdown("Paso del suelo a la pared. Se sitúa según la perspectiva de la "
+                                        "peana y se desenfoca más cuanto más lejos queda la pared.")
+                            horizonte = gr.Slider(0, 1, 0.0, step=0.01, label="Intensidad",
+                                                  info="0 = fondo negro continuo, sin horizonte")
+                            h_distancia = gr.Slider(0.5, 10, 3.0, step=0.1, label="Distancia de la pared",
+                                                    info="En diámetros de peana detrás de la figura")
+                            h_desenfoque = gr.Slider(0, 3, 0.5, step=0.05, label="Desenfoque de la línea")
+                            h_suelo = gr.Slider(0, 1, 0.5, step=0.01, label="Luminosidad del suelo")
+                            h_altura = gr.Slider(-0.5, 0.5, 0.0, step=0.01, label="Ajuste fino de la altura",
+                                                 info="Por si la perspectiva estimada no convence")
+                        with gr.Tab("Encuadre", id="encuadre"):
+                            reencuadrar = gr.Checkbox(True, label="Centrar la figura (sin reescalarla)")
+                            margen = gr.Slider(0, 0.5, 0.12, step=0.01, label="Margen")
+                            proporcion = gr.Dropdown(["original", *PROPORCIONES], value="original",
+                                                     label="Proporción")
+
+                # ---------------- Visor ----------------
+                with gr.Column(scale=3, min_width=480):
+                    with gr.Tabs(elem_id="visor-tabs"):
+                        with gr.Tab("Antes / después", id="comparar"):
+                            comparador = gr.ImageSlider(show_label=False, type="pil", elem_id="comparador")
+                        with gr.Tab("Máscara", id="mascara_tab"):
+                            mascara = gr.Image(show_label=False, type="pil", elem_id="mascara")
+                    descarga = gr.DownloadButton("Descargar resultado (PNG sin pérdida)", variant="primary")
+
+        with gr.Tab("Varias fotos", id="varias"):
+            gr.Markdown("Se procesan con los ajustes elegidos en la pestaña **Una foto**.")
+            with gr.Row(equal_height=True):
+                lote = gr.File(file_count="multiple", file_types=["image", ".heic", ".heif"],
+                               label="Fotos", scale=2)
+                with gr.Column(scale=1, min_width=260):
+                    boton_lote = gr.Button("Procesar todas", variant="primary")
+                    zip_salida = gr.File(label="ZIP con los resultados")
 
     ajustes = [halo, vineteado, sombra, reflejo, caida, oscurecer, dominante, negro, reencuadrar,
                margen, proporcion, descontaminar, horizonte, h_distancia, h_desenfoque, h_suelo, h_altura]
@@ -160,9 +199,10 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio") as demo:
     salidas = [comparador, mascara, descarga]
     boton.click(procesar_una, entradas, salidas)
     entrada.change(procesar_una, entradas, salidas)
+    # "always_last": al arrastrar un control sólo se procesa el último valor, y
+    # también reacciona cuando se escribe el número en la casilla.
     for c in [*ajustes, modelo, huecos]:
-        c.release(procesar_una, entradas, salidas) if isinstance(c, gr.Slider) \
-            else c.change(procesar_una, entradas, salidas)
+        c.change(procesar_una, entradas, salidas, trigger_mode="always_last", show_progress="minimal")
     boton_cerrar.click(cerrar_aplicacion, None, boton_cerrar, js=AVISO_CIERRE, queue=False)
     boton_lote.click(procesar_lote, [lote, modelo, huecos, *ajustes], zip_salida)
 
@@ -171,4 +211,4 @@ if __name__ == "__main__":
     # Si se arranca en segundo plano (p. ej. desde el lanzador), el shell hace que
     # se ignore Ctrl + C; se restaura para que el botón "Cerrar aplicación" funcione.
     signal.signal(signal.SIGINT, signal.default_int_handler)
-    demo.queue(default_concurrency_limit=1).launch()
+    demo.queue(default_concurrency_limit=1).launch(css=CSS)
