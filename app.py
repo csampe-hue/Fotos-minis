@@ -33,11 +33,15 @@ def _mascara(arr: np.ndarray, modelo: str, huecos: int) -> np.ndarray:
 
 
 def _opciones(halo, vineteado, sombra, reflejo, caida, oscurecer, dominante, negro, reencuadrar,
-              margen, proporcion, descontaminar) -> OpcionesEstudio:
+              margen, proporcion, descontaminar, horizonte, h_distancia, h_desenfoque,
+              h_suelo, h_altura) -> OpcionesEstudio:
     return OpcionesEstudio(halo=halo, vineteado=vineteado, sombra=sombra, reflejo=reflejo,
                            reflejo_caida=caida, oscurecer_borde=oscurecer,
                            corregir_dominante=dominante, negro=int(negro), reencuadrar=reencuadrar,
-                           margen=margen, proporcion=proporcion, descontaminar_bordes=descontaminar)
+                           margen=margen, proporcion=proporcion, descontaminar_bordes=descontaminar,
+                           horizonte=horizonte, horizonte_distancia=h_distancia,
+                           horizonte_desenfoque=h_desenfoque, horizonte_suelo=h_suelo,
+                           horizonte_altura=h_altura)
 
 
 def procesar_una(ruta, modelo, huecos, *ajustes):
@@ -99,8 +103,19 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio") as demo:
                 dominante = gr.Slider(0, 1, 0.0, step=0.01, label="Corregir dominante de color de la luz",
                                       info="0 = colores originales intactos")
                 negro = gr.Slider(0, 40, 0, step=1, label="Nivel del negro de fondo")
+            with gr.Accordion("Horizonte (paso del suelo a la pared)", open=False):
+                gr.Markdown("La línea se sitúa según la perspectiva de la peana y se desenfoca "
+                            "más cuanto más lejos queda la pared.")
+                horizonte = gr.Slider(0, 1, 0.0, step=0.01, label="Intensidad del horizonte",
+                                      info="0 = fondo negro continuo, sin horizonte")
+                h_distancia = gr.Slider(0.5, 10, 3.0, step=0.1, label="Distancia de la pared",
+                                        info="En diámetros de peana detrás de la figura")
+                h_desenfoque = gr.Slider(0, 3, 0.5, step=0.05, label="Desenfoque de la línea")
+                h_suelo = gr.Slider(0, 1, 0.5, step=0.01, label="Luminosidad del suelo")
+                h_altura = gr.Slider(-0.5, 0.5, 0.0, step=0.01, label="Ajuste fino de la altura",
+                                     info="Corrige la posición si la perspectiva estimada no convence")
             with gr.Accordion("Encuadre", open=False):
-                reencuadrar = gr.Checkbox(True, label="Reencuadrar centrando la figura (sin reescalarla)")
+                reencuadrar = gr.Checkbox(True, label="Reencuadrar centrando la figura en horizontal y vertical (sin reescalarla)")
                 margen = gr.Slider(0, 0.5, 0.12, step=0.01, label="Margen")
                 proporcion = gr.Dropdown(["original", *PROPORCIONES], value="original", label="Proporción")
             boton = gr.Button("Procesar", variant="primary")
@@ -116,7 +131,7 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio") as demo:
         zip_salida = gr.File(label="ZIP con los resultados")
 
     ajustes = [halo, vineteado, sombra, reflejo, caida, oscurecer, dominante, negro, reencuadrar,
-               margen, proporcion, descontaminar]
+               margen, proporcion, descontaminar, horizonte, h_distancia, h_desenfoque, h_suelo, h_altura]
     entradas = [entrada, modelo, huecos, *ajustes]
     salidas = [comparador, mascara, descarga]
     boton.click(procesar_una, entradas, salidas)

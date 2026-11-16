@@ -67,3 +67,32 @@ def test_procesar_con_mascara_dada():
     img, alfa = _escena()
     r = procesar(Image.fromarray(img), OpcionesEstudio(reflejo=0.4), alfa=alfa)
     assert r.estudio.mode == "RGB" and r.recorte.mode == "RGBA"
+
+
+def test_reencuadre_centra_en_horizontal_y_vertical():
+    from fotos_minis.composicion import _pegar, caja_sujeto, calcular_lienzo
+
+    img, alfa = _escena()
+    # Sujeto pegado a la esquina de la foto y con una penumbra débil hasta el borde.
+    alfa = np.roll(alfa, (40, -70), axis=(0, 1))
+    alfa[-3:, 100:140] = 0.2
+    for op in [OpcionesEstudio(), OpcionesEstudio(proporcion="16:9"), OpcionesEstudio(reflejo=0.5)]:
+        ox, oy, W, H = calcular_lienzo(alfa, op)
+        lienzo = np.zeros((H, W), np.float32)
+        _pegar(lienzo, alfa, ox, oy)
+        x0, y0, x1, y1 = caja_sujeto(lienzo, 0.5)
+        assert abs(x0 - (W - x1)) <= 1 and abs(y0 - (H - y1)) <= 1
+
+
+def test_horizonte_coherente_con_la_perspectiva():
+    from fotos_minis.composicion import geometria_peana, linea_horizonte
+
+    _, alfa = _escena()  # peana: elipse de semiejes 60 x 15 -> inclinación 0,25
+    g = geometria_peana(alfa)
+    assert 0.18 <= g["inclinacion"] <= 0.32
+    cerca, s1 = linea_horizonte(g, OpcionesEstudio(horizonte=1, horizonte_distancia=1))
+    lejos, s2 = linea_horizonte(g, OpcionesEstudio(horizonte=1, horizonte_distancia=5))
+    assert lejos < cerca < g["y_suelo"]   # más lejos -> más arriba en la imagen
+    assert s2 > s1                        # más lejos -> más desenfocada
+    out = componer(*_escena(), OpcionesEstudio(horizonte=1, reencuadrar=False, vineteado=0))
+    assert out[5, 5].sum() < out[-5, 5].sum()  # pared más oscura que el suelo

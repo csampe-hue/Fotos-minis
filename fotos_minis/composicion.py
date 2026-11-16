@@ -25,6 +25,12 @@ class OpcionesEstudio:
     sombra: float = 0.6             # sombra de contacto bajo la peana (0-1)
     reflejo: float = 0.0            # reflejo en suelo negro brillante (0-1)
     reflejo_caida: float = 0.25     # longitud del reflejo relativa a la altura del sujeto
+    # Horizonte: transición visible del suelo a la pared del fondo
+    horizonte: float = 0.0          # intensidad (0 = sin horizonte, fondo negro continuo)
+    horizonte_distancia: float = 3.0  # distancia suelo-pared detrás de la peana (en diámetros de peana)
+    horizonte_desenfoque: float = 0.5  # desenfoque de la línea (0 = nítida; crece con la distancia)
+    horizonte_suelo: float = 0.5    # luminosidad del suelo respecto a la pared (0-1)
+    horizonte_altura: float = 0.0   # ajuste manual de la altura (fracción de la altura del sujeto, + = más arriba)
     # Integración del sujeto
     descontaminar_bordes: bool = True   # quita el color del fondo antiguo del contorno
     oscurecer_borde: float = 0.15       # "light wrap" negro: el entorno oscuro envuelve el borde
@@ -78,8 +84,27 @@ def geometria_peana(alfa: np.ndarray) -> dict:
     fondo_col = np.where(colsub.any(axis=0), colsub.shape[0] - 1 - np.argmax(colsub[::-1], axis=0), -1)
     validos = fondo_col[fondo_col >= 0]
     y_suelo = float(np.percentile(validos, 95)) if len(validos) else float(y1)
+
+    # Inclinación de la cámara a partir de la peana: una peana redonda vista con un
+    # ángulo θ sobre la mesa es una elipse de proporción alto/ancho = sen θ. En el
+    # borde inferior de la silueta, los extremos izquierdo y derecho están a la
+    # altura del centro de la elipse y el punto más bajo, un semieje menor por debajo.
+    inclinacion, y_centro = 0.3, y_suelo - 0.3 * ancho / 2
+    a_ = ancho / 2
+    if a_ > 4:
+        rel = np.arange(x0, x1) + 0.5 - cx
+        u = np.abs(rel) / a_
+        extremos = (u > 0.9) & (u <= 1.0) & (fondo_col >= 0)
+        if extremos.sum() >= 2:
+            # Cerca de los extremos el borde ya ha bajado b·sqrt(1-u²): se descuenta.
+            y_ext = float(np.median(fondo_col[extremos]))
+            caida = float(np.median(np.sqrt(np.clip(1 - u[extremos] ** 2, 0, 1))))
+            b = (y_suelo - y_ext) / max(1.0 - caida, 0.3)
+            inclinacion = float(np.clip(b / a_, 0.08, 0.8))
+            y_centro = y_suelo - b
     return {"cx": float(cx), "ancho": float(ancho), "y_suelo": y_suelo,
-            "caja": (x0, y0, x1, y1), "alto": float(alto)}
+            "caja": (x0, y0, x1, y1), "alto": float(alto),
+            "inclinacion": inclinacion, "y_centro": y_centro}
 
 
 # --------------------------------------------------------------------------- #
@@ -148,6 +173,21 @@ def corregir_luz(frg: np.ndarray, imagen: np.ndarray, alfa: np.ndarray, fuerza: 
 # Fondo de estudio
 # --------------------------------------------------------------------------- #
 
+def linea_horizonte(geo: dict, op: OpcionesEstudio) -> tuple[float, float]:
+    """Altura (y) de la unión suelo-pared y su desenfoque (sigma, en píxeles).
+
+    Un punto del suelo a una distancia d detrás del centro de la peana aparece
+    d·sen θ más arriba en la foto (θ = inclinación de la cámara), con un ligero
+    escorzo por la perspectiva. El desenfoque crece con esa distancia, porque la
+    figura está enfocada y la pared queda detrás.
+    """
+    k = max(op.horizonte_distancia, 0.0)
+    profundidad = geo["ancho"] * k / (1.0 + 0.12 * k)  # escorzo
+    y = geo["y_centro"] - profundidad * geo["inclinacion"] - op.horizonte_altura * geo["alto"]
+    sigma = 1.0 + op.horizonte_desenfoque * 0.01 * geo["ancho"] * k
+    return float(y), float(sigma)
+
+
 def fondo_estudio(h: int, w: int, geo: dict, op: OpcionesEstudio) -> np.ndarray:
     """Fondo negro de estudio (lineal): negro base + foco suave + suelo + viñeta."""
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
@@ -157,10 +197,25 @@ def fondo_estudio(h: int, w: int, geo: dict, op: OpcionesEstudio) -> np.ndarray:
     alto = max(geo["alto"], 1.0)
     x0, y0, x1, y1 = geo["caja"]
     cy = y0 + 0.45 * (y1 - y0)
-    if op.halo > 0:
-        r = alto * 0.75 * op.halo_tamano
-        d2 = ((xx - geo["cx"]) / (r * 1.15)) ** 2 + ((yy - cy) / r) ** 2
-        foco = np.exp(-d2 * 1.6)
+    r = alto * 0.75 * op.halo_tamano
+    foco = np.exp(-(((xx - geo["cx"]) / (r * 1.15)) ** 2 + ((yy - cy) / r) ** 2) * 1.6)
+
+    if op.horizonte > 0:
+        # Pared (arriba) y suelo (abajo) separados por la línea de horizonte.
+        y_h, sigma = linea_horizonte(geo, op)
+        suelo_m = 0.5 * (1.0 + np.tanh((yy - y_h) / (1.2 * sigma)))
+        # Charco de luz sobre el suelo, en perspectiva: un círculo en la mesa es una
+        # elipse con la misma proporción que la peana.
+        R = 1.8 * geo["ancho"]
+        d2 = ((xx - geo["cx"]) / R) ** 2 + ((yy - geo["y_centro"]) / (R * geo["inclinacion"])) ** 2
+        luz_suelo = (0.004 + 0.035 * np.exp(-d2 * 1.2)) * (0.3 + 1.4 * op.horizonte_suelo)
+        luz_pared = 0.06 * op.halo * foco
+        # La luz de la pared se suaviza más cuanto más lejos está (desenfoque).
+        if sigma > 1.5:
+            luz_pared = cv2.GaussianBlur(luz_pared, (0, 0), sigma * 0.5)
+        fondo += op.horizonte * luz_suelo * suelo_m + luz_pared * (1 - suelo_m) \
+            + (1 - op.horizonte) * 0.06 * op.halo * foco * suelo_m
+    elif op.halo > 0:
         # El foco se apaga al llegar al suelo (perspectiva: el telón cae detrás de la peana).
         caida = np.clip((geo["y_suelo"] - yy) / (0.08 * alto) + 0.5, 0, 1)
         suelo = np.exp(-(((xx - geo["cx"]) / (r * 1.4)) ** 2 + ((yy - geo["y_suelo"]) / (r * 0.25)) ** 2))
@@ -190,11 +245,15 @@ def calcular_lienzo(alfa: np.ndarray, op: OpcionesEstudio) -> tuple[int, int, in
     h, w = alfa.shape
     if not op.reencuadrar:
         return 0, 0, w, h
-    x0, y0, x1, y1 = caja_sujeto(alfa)
+    # Caja de la parte sólida del sujeto: las penumbras débiles del contorno (p. ej.
+    # restos de sombra) no deben desplazar el centrado.
+    x0, y0, x1, y1 = caja_sujeto(alfa, umbral=0.5)
     bw, bh = x1 - x0, y1 - y0
     extra_inf = op.reflejo_caida * bh if op.reflejo > 0 else 0
     m = int(op.margen * max(bw, bh))
-    W, H = bw + 2 * m, int(bh + 2 * m + extra_inf)
+    # Lienzo simétrico: el sujeto queda centrado en horizontal y en vertical. Si hay
+    # reflejo, el margen inferior (y por simetría el superior) crece para que quepa.
+    W, H = bw + 2 * m, int(bh + 2 * (m + extra_inf))
     prop = PROPORCIONES.get(op.proporcion)
     if prop is None:
         prop = w / h
@@ -203,20 +262,8 @@ def calcular_lienzo(alfa: np.ndarray, op: OpcionesEstudio) -> tuple[int, int, in
     else:
         H = int(round(W / prop))
     W, H = W + W % 2, H + H % 2
-    # Centrado horizontal; vertical con el sujeto algo por encima del centro si hay reflejo.
-    ox = (W - bw) // 2 - x0
-    libre = H - bh - extra_inf
-    oy = int(libre / 2) - y0
-    # Si el sujeto está cortado por un borde de la foto, se mantiene pegado a ese
-    # borde del lienzo para que el corte no quede "flotando" en el negro.
-    if x0 == 0:
-        ox = 0
-    elif x1 == w:
-        ox = W - w
-    if y0 == 0:
-        oy = 0
-    elif y1 == h:
-        oy = H - h
+    ox = int(round((W - bw) / 2)) - x0
+    oy = int(round((H - bh) / 2)) - y0
     return ox, oy, W, H
 
 

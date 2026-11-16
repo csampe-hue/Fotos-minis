@@ -23,6 +23,14 @@ def main(argv=None) -> None:
     p.add_argument("--vineteado", type=float, default=0.35)
     p.add_argument("--sombra", type=float, default=0.6, help="sombra de contacto (0-1)")
     p.add_argument("--reflejo", type=float, default=0.0, help="reflejo en suelo brillante (0-1)")
+    p.add_argument("--horizonte", type=float, default=0.0,
+                   help="intensidad del paso suelo-pared (0 = sin horizonte)")
+    p.add_argument("--horizonte-distancia", type=float, default=3.0,
+                   help="distancia de la pared, en diámetros de peana")
+    p.add_argument("--horizonte-desenfoque", type=float, default=0.5)
+    p.add_argument("--horizonte-suelo", type=float, default=0.5, help="luminosidad del suelo (0-1)")
+    p.add_argument("--horizonte-altura", type=float, default=0.0,
+                   help="ajuste fino de la altura (fracción de la altura de la figura)")
     p.add_argument("--oscurecer-borde", type=float, default=0.15)
     p.add_argument("--corregir-dominante", type=float, default=0.0,
                    help="neutraliza la dominante de color de la luz original (0-1)")
@@ -37,7 +45,11 @@ def main(argv=None) -> None:
     a = p.parse_args(argv)
 
     op = OpcionesEstudio(negro=a.negro, halo=a.halo, vineteado=a.vineteado, sombra=a.sombra,
-                         reflejo=a.reflejo, oscurecer_borde=a.oscurecer_borde,
+                         reflejo=a.reflejo, horizonte=a.horizonte,
+                         horizonte_distancia=a.horizonte_distancia,
+                         horizonte_desenfoque=a.horizonte_desenfoque,
+                         horizonte_suelo=a.horizonte_suelo, horizonte_altura=a.horizonte_altura,
+                         oscurecer_borde=a.oscurecer_borde,
                          corregir_dominante=a.corregir_dominante, margen=a.margen,
                          proporcion=a.proporcion, reencuadrar=not a.sin_reencuadre)
     ficheros = []
