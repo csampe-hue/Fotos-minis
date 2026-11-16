@@ -49,11 +49,12 @@ def _opciones(*ajustes) -> OpcionesEstudio:
 _ultima_firma: tuple | None = None
 
 
-def procesar_una(ruta, modelo, huecos, *ajustes):
+def procesar_una(ruta, modelo, huecos, *ajustes, progress=gr.Progress()):
     global _ultima_firma
     if ruta is None:
-        _ultima_firma = None
-        return None, None, None
+        # Al sustituir una foto por otra el componente pasa un instante por "vacío":
+        # no se borra el resultado (sólo se borra al pulsar la X, ver limpiar()).
+        return gr.skip(), gr.skip(), gr.skip()
     # Al aplicar un perfil cambian muchos controles a la vez y cada uno lanza un
     # evento: si los valores son los mismos que los del último resultado, no se repite.
     firma = (ruta, modelo, huecos, *ajustes)
@@ -61,7 +62,10 @@ def procesar_una(ruta, modelo, huecos, *ajustes):
         return gr.skip(), gr.skip(), gr.skip()
     img = cargar(ruta)
     arr = np.asarray(img)
+    if _clave(arr, modelo, huecos) not in _cache_mascaras:
+        progress(0.1, desc="Recortando la figura… (la primera foto tarda más: se cargan los modelos)")
     alfa, primer_plano = _mascara(arr, modelo, huecos)
+    progress(0.9, desc="Componiendo el fondo…")
     op = _opciones(*ajustes)
     out = componer(arr, alfa, op, primer_plano)
     # "Antes" con el mismo encuadre que el resultado, para que el comparador coincida.
@@ -148,6 +152,13 @@ def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
     return str(zip_path)
 
 
+def limpiar():
+    """La X de la foto original: se vacía también el resultado."""
+    global _ultima_firma
+    _ultima_firma = None
+    return None, None, None
+
+
 def cerrar_aplicacion():
     """Detiene el servidor de forma ordenada: equivale a pulsar Ctrl + C en la terminal
     (Gradio cierra el servidor y el programa termina). Se hace con un pequeño retraso
@@ -177,6 +188,35 @@ APLICAR_APARIENCIA = """(modo) => {
     if (!window.__fmEscucha) { medio.addEventListener('change', aplicar); window.__fmEscucha = true; }
     aplicar();
     return modo;
+}"""
+
+# Si ya hay una foto cargada, Gradio oculta su zona de soltar: al arrastrar otra
+# encima borra la actual y no recibe la nueva. Se intercepta el arrastre sobre la
+# foto y se entrega el fichero al selector de ficheros del componente, que la sustituye.
+SUSTITUIR_AL_SOLTAR = """() => {
+    if (window.__fmSoltar) return;
+    window.__fmSoltar = true;
+    const conFoto = (e) => {
+        const caja = e.target.closest && e.target.closest('#entrada');
+        return caja && caja.querySelector('.image-frame img') ? caja : null;
+    };
+    const bloquear = (e) => {
+        if (!conFoto(e)) return;
+        e.preventDefault(); e.stopPropagation();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    };
+    for (const t of ['dragenter', 'dragover', 'dragleave']) document.addEventListener(t, bloquear, true);
+    document.addEventListener('drop', (e) => {
+        const caja = conFoto(e);
+        if (!caja) return;
+        e.preventDefault(); e.stopPropagation();
+        const f = [...(e.dataTransfer?.files || [])][0];
+        const input = caja.querySelector('input[type=file]');
+        if (!f || !input) return;
+        const dt = new DataTransfer(); dt.items.add(f);
+        input.files = dt.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, true);
 }"""
 
 CSS = """
@@ -225,7 +265,7 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
             with gr.Row(equal_height=False):
                 # ---------------- Panel de ajustes ----------------
                 with gr.Column(scale=1, min_width=330, elem_id="panel"):
-                    entrada = gr.Image(label="Foto original", type="filepath", height=210,
+                    entrada = gr.Image(label="Foto original", type="filepath", height=210, elem_id="entrada",
                                        sources=["upload", "clipboard"])
                     boton = gr.Button("Volver a procesar", variant="primary", size="sm")
                     with gr.Tabs():
@@ -299,11 +339,13 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
     salidas = [comparador, mascara, descarga]
     boton.click(procesar_una, entradas, salidas)
     entrada.change(procesar_una, entradas, salidas)
+    entrada.clear(limpiar, None, salidas)
     # "always_last": al arrastrar un control sólo se procesa el último valor, y
     # también reacciona cuando se escribe el número en la casilla.
     for c in [*ajustes, modelo, huecos]:
         c.change(procesar_una, entradas, salidas, trigger_mode="always_last", show_progress="minimal")
     controles = [modelo, huecos, *ajustes]  # mismo orden que perfiles.CAMPOS
+    demo.load(None, None, None, js=SUSTITUIR_AL_SOLTAR)
     demo.load(al_abrir, None, [*controles, perfil, estado_perfiles, apariencia]) \
         .then(None, apariencia, None, js=APLICAR_APARIENCIA)
     apariencia.input(guardar_apariencia, apariencia, None, js=APLICAR_APARIENCIA, queue=False)
