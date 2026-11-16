@@ -82,6 +82,13 @@ r.estudio.save("mini_estudio.png")
 r.recorte.save("mini_recorte.png")   # RGBA
 ```
 
+## Formatos
+
+Acepta JPG, PNG, WebP, TIFF y **HEIC/HEIF** (fotos de iPhone). El perfil de color de la
+foto original (p. ej. Display P3) se conserva en el resultado para que los colores de la
+pintura no cambien. En la interfaz web el navegador no muestra la miniatura de un HEIC
+en el recuadro de entrada, pero se procesa igual y aparece en el comparador.
+
 ## Consejos para mejores resultados
 
 - Fotografía la figura completa dentro del encuadre, peana incluida.

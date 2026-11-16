@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image
 
 from fotos_minis.composicion import PROPORCIONES, OpcionesEstudio, _pegar, calcular_lienzo, componer
-from fotos_minis.proceso import cargar, procesar
+from fotos_minis.proceso import cargar, guardar, procesar
 from fotos_minis.segmentacion import MODELO_POR_DEFECTO, MODELOS, mascara_bruta, refinar_mascara
 
 _cache_mascaras: dict[str, np.ndarray] = {}
@@ -53,7 +53,9 @@ def procesar_una(ruta, modelo, huecos, *ajustes):
     antes = np.zeros((H, W, 3), np.uint8)
     _pegar(antes, arr, ox, oy)
     destino = Path(tempfile.mkdtemp()) / f"{Path(ruta).stem}_estudio.png"
-    Image.fromarray(out).save(destino)
+    resultado = Image.fromarray(out)
+    resultado.info.update(img.info)
+    guardar(resultado, destino)
     mascara = Image.fromarray(np.round(alfa * 255).astype(np.uint8))
     return (Image.fromarray(antes), Image.fromarray(out)), mascara, str(destino)
 
@@ -68,7 +70,7 @@ def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
         for f in progress.tqdm(ficheros, desc="Procesando"):
             r = procesar(f, op, modelo=modelo, rellenar_huecos_px=int(huecos))
             nombre = f"{Path(f).stem}_estudio.png"
-            r.estudio.save(carpeta / nombre)
+            guardar(r.estudio, carpeta / nombre)
             z.write(carpeta / nombre, nombre)
     return str(zip_path)
 
@@ -109,7 +111,7 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio") as demo:
                 mascara = gr.Image(label="Máscara", type="pil", height=200)
 
     with gr.Accordion("Procesar varias fotos a la vez", open=False):
-        lote = gr.File(file_count="multiple", file_types=["image"], label="Fotos")
+        lote = gr.File(file_count="multiple", file_types=["image", ".heic", ".heif"], label="Fotos")
         boton_lote = gr.Button("Procesar lote con los ajustes actuales")
         zip_salida = gr.File(label="ZIP con los resultados")
 

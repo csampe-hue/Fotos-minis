@@ -6,10 +6,10 @@ import argparse
 from pathlib import Path
 
 from .composicion import PROPORCIONES, OpcionesEstudio
-from .proceso import procesar
+from .proceso import guardar, procesar
 from .segmentacion import MODELO_POR_DEFECTO, MODELOS
 
-EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".bmp", ".heic"}
+EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".bmp", ".heic", ".heif"}
 
 
 def main(argv=None) -> None:
@@ -48,7 +48,7 @@ def main(argv=None) -> None:
         print(f"[{i}/{len(ficheros)}] {f}", flush=True)
         r = procesar(f, op, modelo=a.modelo, rellenar_huecos_px=a.rellenar_huecos)
         destino = a.salida / f"{f.stem}_estudio.jpg"
-        r.estudio.save(destino, quality=a.calidad, subsampling=0)
+        guardar(r.estudio, destino, quality=a.calidad, subsampling=0)
         if a.recorte:
-            r.recorte.save(a.salida / f"{f.stem}_recorte.png")
+            guardar(r.recorte, a.salida / f"{f.stem}_recorte.png")
         print(f"    -> {destino}")

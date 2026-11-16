@@ -152,6 +152,17 @@ def refinar_mascara(
             sub = alfa[y0:y1, x0:x1]
             sub[zona] = fino[zona]
 
+    # En fotos grandes la máscara del modelo (calculada a ~1024 px) llega muy
+    # ampliada y deja una "cola" semitransparente de varios píxeles sobre el fondo,
+    # que en negro se ve como un halo gris. Se estrecha la transición en proporción
+    # a esa ampliación; en fotos pequeñas no se toca.
+    ampliacion = max(h, w) / 1024.0
+    fuerza = float(np.clip((ampliacion - 1.0) / 1.5, 0.0, 1.0))
+    if fuerza > 0:
+        lo, hi = 0.3 * fuerza, 1.0 - 0.2 * fuerza
+        t = np.clip((alfa - lo) / (hi - lo), 0.0, 1.0)
+        alfa = (t * t * (3 - 2 * t)).astype(np.float32)
+
     # El núcleo sólido del sujeto queda exactamente a 1 (sin cambios en sus píxeles).
     nucleo = cv2.erode((alfa > 0.9).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
     alfa[nucleo] = 1.0
