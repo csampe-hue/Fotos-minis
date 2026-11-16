@@ -47,6 +47,15 @@ Memoria: el modo combinado (por defecto) necesita unos **9 GB de RAM** en CPU
 
 ## Uso
 
+### Arranque con doble clic (Mac)
+
+Haz doble clic en **`Iniciar Fotos Minis.command`**. La primera vez prepara el entorno
+(instala uv, Python 3.12 y las librerías; tarda unos minutos) y después arranca la
+aplicación y abre el navegador. Para cerrarla, cierra la ventana de Terminal.
+
+Si macOS lo bloquea por ser de un «desarrollador no identificado», haz clic derecho
+sobre el fichero → **Abrir** → **Abrir** (sólo hace falta la primera vez).
+
 ### Interfaz web
 
 ```bash
