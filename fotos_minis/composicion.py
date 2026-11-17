@@ -253,13 +253,79 @@ def fondo_estudio(h: int, w: int, geo: dict, op: OpcionesEstudio) -> np.ndarray:
         fondo *= (1.0 - op.vineteado * np.clip(d, 0, 1) ** 2)[..., None]
 
     if op.sombra > 0:
-        # Sombra de contacto: elipse en perspectiva bajo la peana.
-        rx = geo["ancho"] * 0.55
-        ry = max(geo["ancho"] * 0.09, 2.0)
-        d2 = ((xx - geo["cx"]) / rx) ** 2 + ((yy - geo["y_suelo"]) / ry) ** 2
-        s = np.exp(-d2 * 2.0)
-        fondo *= (1.0 - op.sombra * s)[..., None]
+        fondo *= sombras_contacto(h, w, geo, op.sombra)[..., None]
     return np.clip(fondo, 0, 1)
+
+
+def peanas(alfa: np.ndarray) -> list[dict]:
+    """Geometría de cada peana: una por figura separada (fotos de grupo)."""
+    binaria = (alfa > 0.5).astype(np.uint8)
+    n, etiquetas, stats, _ = cv2.connectedComponentsWithStats(binaria, connectivity=8)
+    if n <= 1:
+        return [geometria_peana(alfa)]
+    mayor = stats[1:, cv2.CC_STAT_AREA].max()
+    res = []
+    for k in range(1, n):
+        if stats[k, cv2.CC_STAT_AREA] < 0.05 * mayor:
+            continue
+        res.append(geometria_peana(np.where(etiquetas == k, alfa, 0).astype(np.float32)))
+    return res
+
+
+def sombras_contacto(h: int, w: int, geo: dict, fuerza: float) -> np.ndarray:
+    """Factor multiplicativo (≤1) con la sombra de contacto de las peanas.
+
+    Funciona con cualquier número de figuras, aunque se solapen (fotos de grupo):
+    1. Las peanas se aíslan de la silueta con una apertura morfológica ancha y baja,
+       que conserva las formas anchas y planas y elimina piernas, brazos y armas.
+    2. Línea de contacto: justo debajo de cada borde inferior visible de una peana
+       (donde la peana toca el suelo apenas llega luz) el suelo se oscurece mucho.
+    3. Penumbra: un oscurecimiento amplio y suave alrededor de las peanas.
+    Las distancias se miden en vertical en la escala de la peana (a·r), así que la
+    sombra respeta la perspectiva del suelo.
+    """
+    alfa = geo.get("alfa")
+    if alfa is None:
+        return np.ones((h, w), np.float32)
+    sujeto = alfa > 0.5
+    lista = geo.get("peanas") or [geo]
+    ancho = float(np.median([g["ancho"] for g in lista]))
+    r = float(np.median([g["inclinacion"] for g in lista]))
+    vertical = max(ancho / 2 * r, 3.0)            # semieje vertical típico de una peana (px)
+
+    # Núcleo de 0,6 anchos de peana: más ancho que cualquier torso, más estrecho que la peana.
+    kw = max(int(ancho * 0.6), 5)
+    kh = max(int(vertical * 0.25), 3)
+    nucleo = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kw | 1, kh | 1))
+    abierta = cv2.morphologyEx(sujeto.astype(np.uint8), cv2.MORPH_OPEN, nucleo)
+    # La apertura recorta las filas más bajas de cada peana (el fondo de la elipse es
+    # más estrecho que el núcleo): se recuperan dilatando dentro de la silueta.
+    recuperar = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kw | 1, (3 * kh) | 1))
+    peana = sujeto & (cv2.dilate(abierta, recuperar) > 0)
+    # Y sólo la parte baja de cada silueta: a menos de 2,5 semiejes del borde inferior.
+    hasta_abajo = np.full((h, w), np.inf, np.float32)
+    actual = np.full(w, np.inf, np.float32)
+    for y in range(h - 1, -1, -1):
+        actual = np.where(sujeto[y], actual + 1, 0.0)
+        hasta_abajo[y] = actual
+    peana &= hasta_abajo <= 2.5 * vertical
+
+    # Distancia (en filas) bajo el último borde inferior de peana, por columnas.
+    borde = peana & ~np.vstack([sujeto[1:], np.zeros((1, w), bool)])
+    dist = np.full((h, w), np.inf, np.float32)
+    actual = np.full(w, np.inf, np.float32)
+    for y in range(h):
+        actual = np.where(sujeto[y], np.inf, actual + 1)
+        actual = np.where(borde[y], 0.0, actual)
+        dist[y] = actual
+    contacto = np.exp(-(dist / max(0.18 * vertical, 1.5)) ** 2)
+    contacto = cv2.GaussianBlur(contacto, (0, 0), max(vertical * 0.03, 0.7))
+
+    penumbra = cv2.GaussianBlur(peana.astype(np.float32), (0, 0),
+                                sigmaX=max(ancho * 0.10, 1.0), sigmaY=max(vertical * 0.35, 1.0))
+    s = fuerza * (1.3 * contacto + 1.1 * penumbra)
+    s[sujeto] = 0.0
+    return (1.0 - np.clip(s, 0, 0.92)).astype(np.float32)
 
 
 # --------------------------------------------------------------------------- #
@@ -368,6 +434,8 @@ def componer(imagen: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio,
     _pegar(f_l, frg, ox, oy)
 
     geo = geometria_peana(a_l)
+    geo["peanas"] = peanas(a_l)
+    geo["alfa"] = a_l
     s_l = np.zeros((H, W), np.float32)
     if suelo_mascara is not None:
         # Suelo real: se conserva tal cual; sólo la pared pasa a estudio (sin

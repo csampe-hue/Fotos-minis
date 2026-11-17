@@ -87,3 +87,23 @@ def test_foto_de_grupo_con_figuras_a_todo_lo_ancho():
     m = detectar_suelo(img, alfa)
     assert m is not None
     assert np.abs(np.median((m > 0.5).argmax(axis=0)) - LINEA) <= 4
+
+
+def test_cada_peana_de_un_grupo_tiene_sombra_de_contacto():
+    """Peanas solapadas (fila de atrás tapada en parte por la de delante): todas apoyan."""
+    img = np.full((H, W, 3), 120, np.uint8)
+    alfa = np.zeros((H, W), np.float32)
+    yy, xx = np.mgrid[0:H, 0:W]
+    peanas_ = [(110, 190), (290, 190), (200, 225)]      # dos detrás y una delante solapando
+    for cx, cy in peanas_:
+        figura = (np.abs(xx - cx) < 10) & (yy > cy - 90) & (yy < cy)
+        peana = ((xx - cx) / 55) ** 2 + ((yy - cy) / 16) ** 2 <= 1
+        alfa[figura | peana] = 1
+    img[alfa > 0] = (200, 180, 60)
+    op = dict(suelo="oscuro", reencuadrar=False, vineteado=0, halo=0)
+    con = componer(img, alfa, OpcionesEstudio(**op)).astype(float)
+    sin = componer(img, alfa, OpcionesEstudio(sombra=0, **op)).astype(float)
+    for cx, cy in peanas_:
+        zona = (slice(cy + 17, cy + 19), slice(cx - 10, cx + 10))   # justo bajo el borde inferior
+        assert con[zona].mean() < 0.75 * sin[zona].mean(), (cx, cy)
+    assert np.allclose(con[5:40, 5:40], sin[5:40, 5:40], atol=1)    # lejos, ninguna sombra
