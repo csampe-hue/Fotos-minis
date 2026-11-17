@@ -96,6 +96,19 @@ r.estudio.save("mini_estudio.png")
 r.recorte.save("mini_recorte.png")   # RGBA
 ```
 
+## Tipos de suelo (pestaña «Fondo»)
+
+- **Estudio (generado)**: negro continuo, con horizonte opcional.
+- **Conservar el suelo de la foto**: se mantiene el suelo/tapete real sobre el que está la
+  miniatura y sólo la pared del fondo pasa a negro. Al no tener que recortar la peana del
+  suelo, el recorte es más fácil y la sombra real se conserva. La línea suelo-pared se
+  detecta automáticamente (y se puede subir o bajar con «Ajuste de la línea»); si en una
+  foto no se distingue, se avisa y se usa el suelo de estudio. El encuadre no sale de la foto.
+- **Textura oscura** y **Terreno árido**: suelo generado en la misma perspectiva que la
+  peana, más pequeño y desenfocado con la distancia, con su sombra de contacto.
+
+En línea de comandos: `--suelo estudio|original|oscuro|arido` y `--suelo-ajuste`.
+
 ## Perfiles de ajustes
 
 En la pestaña **Perfiles** del panel puedes guardar todos los ajustes actuales con un

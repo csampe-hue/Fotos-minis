@@ -8,10 +8,12 @@ pide explícitamente, se corrige la dominante de color de la iluminación.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import cv2
 import numpy as np
+
+from .suelo import TEXTURAS, detectar_suelo, suelo_en_perspectiva
 
 
 @dataclass
@@ -25,6 +27,9 @@ class OpcionesEstudio:
     sombra: float = 0.6             # sombra de contacto bajo la peana (0-1)
     reflejo: float = 0.0            # reflejo en suelo negro brillante (0-1)
     reflejo_caida: float = 0.25     # longitud del reflejo relativa a la altura del sujeto
+    # Suelo: "estudio" (generado), "original" (el de la foto), "oscuro" o "arido" (texturas)
+    suelo: str = "estudio"
+    suelo_ajuste: float = 0.0       # sólo "original": sube (+) o baja (-) la línea suelo-pared
     # Horizonte: transición visible del suelo a la pared del fondo
     horizonte: float = 0.0          # intensidad (0 = sin horizonte, fondo negro continuo)
     horizonte_distancia: float = 3.0  # distancia suelo-pared detrás de la peana (en diámetros de peana)
@@ -40,6 +45,13 @@ class OpcionesEstudio:
     margen: float = 0.12            # margen alrededor del sujeto (fracción del lado mayor)
     proporcion: str = "original"    # "original", "1:1", "4:5", "3:2", "2:3", "16:9"
 
+
+SUELOS = {
+    "estudio": "Estudio (generado)",
+    "original": "Conservar el suelo de la foto",
+    "oscuro": "Textura oscura",
+    "arido": "Terreno árido",
+}
 
 PROPORCIONES = {"1:1": 1.0, "4:5": 4 / 5, "3:2": 3 / 2, "2:3": 2 / 3, "16:9": 16 / 9, "9:16": 9 / 16}
 
@@ -221,9 +233,24 @@ def fondo_estudio(h: int, w: int, geo: dict, op: OpcionesEstudio) -> np.ndarray:
         suelo = np.exp(-(((xx - geo["cx"]) / (r * 1.4)) ** 2 + ((yy - geo["y_suelo"]) / (r * 0.25)) ** 2))
         fondo += 0.06 * op.halo * (foco * (0.55 + 0.45 * caida) + 0.5 * suelo)
 
+    fondo = fondo[..., None].repeat(3, axis=2)
+
+    if op.suelo in TEXTURAS:
+        # Suelo con textura en perspectiva bajo la línea de horizonte; pared de estudio encima.
+        y_h, sigma = linea_horizonte(geo, op)
+        suelo_m = (0.5 * (1.0 + np.tanh((yy - y_h) / (1.2 * sigma))))[..., None]
+        tex = _srgb_a_lineal(suelo_en_perspectiva(h, w, geo, op.suelo, op.horizonte_desenfoque))
+        R = 1.8 * geo["ancho"]
+        d2 = ((xx - geo["cx"]) / R) ** 2 + ((yy - geo["y_centro"]) / (R * geo["inclinacion"])) ** 2
+        luz = (0.40 + 0.60 * np.exp(-d2 * 0.8)) * (0.4 + 1.2 * op.horizonte_suelo)
+        pared = negro + 0.06 * op.halo * foco
+        if sigma > 1.5:
+            pared = cv2.GaussianBlur(pared, (0, 0), sigma * 0.5)
+        fondo = tex * luz[..., None] * suelo_m + pared[..., None] * (1 - suelo_m)
+
     if op.vineteado > 0:
         d = np.sqrt(((xx - w / 2) / (w / 2)) ** 2 + ((yy - h / 2) / (h / 2)) ** 2) / np.sqrt(2)
-        fondo *= 1.0 - op.vineteado * np.clip(d, 0, 1) ** 2
+        fondo *= (1.0 - op.vineteado * np.clip(d, 0, 1) ** 2)[..., None]
 
     if op.sombra > 0:
         # Sombra de contacto: elipse en perspectiva bajo la peana.
@@ -231,17 +258,22 @@ def fondo_estudio(h: int, w: int, geo: dict, op: OpcionesEstudio) -> np.ndarray:
         ry = max(geo["ancho"] * 0.09, 2.0)
         d2 = ((xx - geo["cx"]) / rx) ** 2 + ((yy - geo["y_suelo"]) / ry) ** 2
         s = np.exp(-d2 * 2.0)
-        fondo *= 1.0 - op.sombra * s
-    return np.clip(fondo, 0, 1)[..., None].repeat(3, axis=2)
+        fondo *= (1.0 - op.sombra * s)[..., None]
+    return np.clip(fondo, 0, 1)
 
 
 # --------------------------------------------------------------------------- #
 # Encuadre
 # --------------------------------------------------------------------------- #
 
-def calcular_lienzo(alfa: np.ndarray, op: OpcionesEstudio) -> tuple[int, int, int, int]:
+def calcular_lienzo(alfa: np.ndarray, op: OpcionesEstudio,
+                    dentro_de_la_foto: bool = False) -> tuple[int, int, int, int]:
     """Devuelve (ox, oy, W, H): desplazamiento del original dentro del nuevo lienzo
-    y tamaño de éste. El sujeto no se reescala nunca: sólo se recorta o amplía el lienzo."""
+    y tamaño de éste. El sujeto no se reescala nunca: sólo se recorta o amplía el lienzo.
+
+    Con ``dentro_de_la_foto`` (se conserva el suelo real) el lienzo no sale de la
+    foto: así el suelo no termina en seco contra el negro.
+    """
     h, w = alfa.shape
     if not op.reencuadrar:
         return 0, 0, w, h
@@ -261,10 +293,31 @@ def calcular_lienzo(alfa: np.ndarray, op: OpcionesEstudio) -> tuple[int, int, in
         W = int(round(H * prop))
     else:
         H = int(round(W / prop))
+    if dentro_de_la_foto:
+        escala = min(1.0, w / W, h / H)
+        W, H = max(int(W * escala), 2), max(int(H * escala), 2)
+        xi = int(np.clip(round((x0 + x1) / 2 - W / 2), 0, w - W))
+        yi = int(np.clip(round((y0 + y1) / 2 - H / 2), 0, h - H))
+        return -xi, -yi, W, H
     W, H = W + W % 2, H + H % 2
     ox = int(round((W - bw) / 2)) - x0
     oy = int(round((H - bh) / 2)) - y0
     return ox, oy, W, H
+
+
+def mascara_suelo(imagen: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio) -> np.ndarray | None:
+    """Máscara del suelo real de la foto (modo "original"), con el ajuste manual
+    de altura aplicado. None si no se distingue el suelo de la pared."""
+    m = detectar_suelo(imagen, alfa)
+    if m is None or op.suelo_ajuste == 0:
+        return m
+    _, y0, _, y1 = caja_sujeto(alfa, umbral=0.5)
+    dy = int(round(op.suelo_ajuste * (y1 - y0)))  # + = la línea sube
+    if dy > 0:
+        m = np.vstack([m[dy:], np.repeat(m[-1:], dy, axis=0)])
+    elif dy < 0:
+        m = np.vstack([np.zeros((-dy, m.shape[1]), m.dtype), m[:dy]])
+    return m
 
 
 def _pegar(dst: np.ndarray, src: np.ndarray, ox: int, oy: int) -> None:
@@ -282,13 +335,24 @@ def _pegar(dst: np.ndarray, src: np.ndarray, ox: int, oy: int) -> None:
 # --------------------------------------------------------------------------- #
 
 def componer(imagen: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio,
-             primer_plano: np.ndarray | None = None) -> np.ndarray:
+             primer_plano: np.ndarray | None = None,
+             suelo_mascara: np.ndarray | None = None) -> np.ndarray:
     """Compone el sujeto sobre el fondo de estudio. Devuelve uint8 RGB.
 
     ``primer_plano`` permite reutilizar el resultado de :func:`descontaminar` (la
-    parte lenta) cuando sólo cambian los ajustes del fondo.
+    parte lenta) cuando sólo cambian los ajustes del fondo. ``suelo_mascara`` permite
+    pasar la máscara del suelo real ya calculada (modo "original").
     """
     alfa = alfa.astype(np.float32)
+    if op.suelo == "original":
+        if suelo_mascara is None:
+            suelo_mascara = mascara_suelo(imagen, alfa, op)
+        if suelo_mascara is None:
+            op = replace(op, suelo="estudio")  # no se distingue el suelo: estudio
+    else:
+        suelo_mascara = None
+    if op.suelo != "estudio":
+        op = replace(op, reflejo=0.0)  # el reflejo sólo tiene sentido en el suelo negro brillante
     if not op.descontaminar_bordes:
         frg = imagen.astype(np.float32) / 255.0
     elif primer_plano is not None:
@@ -297,14 +361,25 @@ def componer(imagen: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio,
         frg = descontaminar(imagen, alfa)
     frg = corregir_luz(frg, imagen, alfa, op.corregir_dominante)
 
-    ox, oy, W, H = calcular_lienzo(alfa, op)
+    ox, oy, W, H = calcular_lienzo(alfa, op, dentro_de_la_foto=suelo_mascara is not None)
     a_l = np.zeros((H, W), np.float32)
     f_l = np.zeros((H, W, 3), np.float32)
     _pegar(a_l, alfa, ox, oy)
     _pegar(f_l, frg, ox, oy)
 
     geo = geometria_peana(a_l)
-    fondo = fondo_estudio(H, W, geo, op)  # lineal
+    s_l = np.zeros((H, W), np.float32)
+    if suelo_mascara is not None:
+        # Suelo real: se conserva tal cual; sólo la pared pasa a estudio (sin
+        # horizonte ni sombra generados: la foto ya tiene los suyos).
+        fondo = fondo_estudio(H, W, geo, replace(op, horizonte=0.0, sombra=0.0, suelo="estudio"))
+        _pegar(s_l, suelo_mascara, ox, oy)
+        orig_f = np.zeros((H, W, 3), np.float32)
+        _pegar(orig_f, imagen.astype(np.float32) / 255.0, ox, oy)
+        s3 = s_l[..., None]
+        fondo = fondo * (1 - s3) + _srgb_a_lineal(orig_f) * s3
+    else:
+        fondo = fondo_estudio(H, W, geo, op)  # lineal
 
     if op.reflejo > 0:
         # Reflejo especular respecto a la línea de contacto de la peana.
@@ -329,7 +404,7 @@ def componer(imagen: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio,
         # El entorno negro "envuelve" ligeramente el contorno, como en una foto real.
         r = max(geo["alto"] / 250, 1.0)
         interior = cv2.GaussianBlur(a_l, (0, 0), r)
-        envolver = np.clip((1 - interior) * a_l * 2.0, 0, 1) * op.oscurecer_borde
+        envolver = np.clip((1 - interior) * a_l * 2.0, 0, 1) * op.oscurecer_borde * (1 - s_l)
         f_lin = f_lin * (1 - envolver[..., None])
     a3 = a_l[..., None]
     salida = _lineal_a_srgb(f_lin * a3 + fondo * (1 - a3))
@@ -344,6 +419,12 @@ def componer(imagen: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio,
         if op.oscurecer_borde > 0:
             nucleo &= envolver < 1e-3
         out[nucleo] = orig[nucleo]
+    if suelo_mascara is not None:
+        # El suelo real conservado también es bit a bit el original.
+        orig = np.zeros((H, W, 3), np.uint8)
+        _pegar(orig, imagen, ox, oy)
+        intacto = s_l >= 1.0
+        out[intacto] = np.where((a_l[intacto] >= 1.0)[:, None], out[intacto], orig[intacto])
     return out
 
 

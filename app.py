@@ -14,7 +14,8 @@ import gradio as gr
 import numpy as np
 from PIL import Image
 
-from fotos_minis.composicion import (PROPORCIONES, OpcionesEstudio, _pegar, calcular_lienzo, componer,
+from fotos_minis.composicion import (PROPORCIONES, SUELOS, OpcionesEstudio, _pegar, calcular_lienzo, componer,
+                                     mascara_suelo,
                                      descontaminar as limpiar_primer_plano)
 from fotos_minis import perfiles, preferencias
 from fotos_minis.perfiles import CAMPOS_ESTUDIO, FABRICA
@@ -67,9 +68,14 @@ def procesar_una(ruta, modelo, huecos, *ajustes, progress=gr.Progress()):
     alfa, primer_plano = _mascara(arr, modelo, huecos)
     progress(0.9, desc="Componiendo el fondo…")
     op = _opciones(*ajustes)
-    out = componer(arr, alfa, op, primer_plano)
+    suelo_m = None
+    if op.suelo == "original":
+        suelo_m = mascara_suelo(arr, alfa, op)
+        if suelo_m is None:
+            gr.Warning("No se distingue el suelo de la pared en esta foto: se usa el suelo de estudio.")
+    out = componer(arr, alfa, op, primer_plano, suelo_mascara=suelo_m)
     # "Antes" con el mismo encuadre que el resultado, para que el comparador coincida.
-    ox, oy, W, H = calcular_lienzo(alfa, op)
+    ox, oy, W, H = calcular_lienzo(alfa, op, dentro_de_la_foto=suelo_m is not None)
     antes = np.zeros((H, W, 3), np.uint8)
     _pegar(antes, arr, ox, oy)
     destino = Path(tempfile.mkdtemp()) / f"{Path(ruta).stem}_estudio.png"
@@ -279,17 +285,26 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                             dominante = gr.Slider(0, 1, 0.0, step=0.01, label="Corregir dominante de color",
                                                   info="0 = colores originales intactos")
                             negro = gr.Slider(0, 40, 0, step=1, label="Nivel del negro de fondo")
-                        with gr.Tab("Horizonte", id="horizonte"):
-                            gr.Markdown("Paso del suelo a la pared. Se sitúa según la perspectiva de la "
-                                        "peana y se desenfoca más cuanto más lejos queda la pared.")
-                            horizonte = gr.Slider(0, 1, 0.0, step=0.01, label="Intensidad",
-                                                  info="0 = fondo negro continuo, sin horizonte")
-                            h_distancia = gr.Slider(0.5, 10, 3.0, step=0.1, label="Distancia de la pared",
-                                                    info="En diámetros de peana detrás de la figura")
-                            h_desenfoque = gr.Slider(0, 3, 0.5, step=0.05, label="Desenfoque de la línea")
-                            h_suelo = gr.Slider(0, 1, 0.5, step=0.01, label="Luminosidad del suelo")
-                            h_altura = gr.Slider(-0.5, 0.5, 0.0, step=0.01, label="Ajuste fino de la altura",
-                                                 info="Por si la perspectiva estimada no convence")
+                        with gr.Tab("Fondo", id="fondo"):
+                            suelo = gr.Radio([(v, k) for k, v in SUELOS.items()], value="estudio",
+                                             label="Suelo")
+                            with gr.Group(visible=False) as grupo_original:
+                                gr.Markdown("Se conserva el suelo real de la foto y sólo la pared "
+                                            "pasa a negro. El encuadre no sale de la foto.")
+                                suelo_ajuste = gr.Slider(-0.5, 0.5, 0.0, step=0.01,
+                                                         label="Ajuste de la línea suelo-pared",
+                                                         info="+ la sube, − la baja (si la detección no es exacta)")
+                            with gr.Group() as grupo_horizonte:
+                                gr.Markdown("Paso del suelo a la pared, según la perspectiva de la peana; "
+                                            "se desenfoca más cuanto más lejos queda la pared.")
+                                horizonte = gr.Slider(0, 1, 0.0, step=0.01, label="Intensidad del horizonte",
+                                                      info="Sólo suelo de estudio: 0 = negro continuo")
+                                h_distancia = gr.Slider(0.5, 10, 3.0, step=0.1, label="Distancia de la pared",
+                                                        info="En diámetros de peana detrás de la figura")
+                                h_desenfoque = gr.Slider(0, 3, 0.5, step=0.05, label="Desenfoque de la línea")
+                                h_suelo = gr.Slider(0, 1, 0.5, step=0.01, label="Luminosidad del suelo")
+                                h_altura = gr.Slider(-0.5, 0.5, 0.0, step=0.01, label="Ajuste fino de la altura",
+                                                     info="Por si la perspectiva estimada no convence")
                         with gr.Tab("Encuadre", id="encuadre"):
                             reencuadrar = gr.Checkbox(True, label="Centrar la figura (sin reescalarla)")
                             margen = gr.Slider(0, 0.5, 0.12, step=0.01, label="Margen")
@@ -315,7 +330,8 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                     zip_salida = gr.File(label="ZIP con los resultados")
 
     ajustes = [halo, vineteado, sombra, reflejo, caida, oscurecer, dominante, negro, reencuadrar,
-               margen, proporcion, descontaminar, horizonte, h_distancia, h_desenfoque, h_suelo, h_altura]
+               margen, proporcion, descontaminar, suelo, suelo_ajuste, horizonte, h_distancia, h_desenfoque,
+               h_suelo, h_altura]
     entradas = [entrada, modelo, huecos, *ajustes]
     salidas = [comparador, mascara, descarga]
     boton.click(procesar_una, entradas, salidas)
@@ -326,6 +342,8 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
     for c in [*ajustes, modelo, huecos]:
         c.change(procesar_una, entradas, salidas, trigger_mode="always_last", show_progress="minimal")
     controles = [modelo, huecos, *ajustes]  # mismo orden que perfiles.CAMPOS
+    suelo.change(lambda v: (gr.update(visible=v == "original"), gr.update(visible=v != "original")),
+                 suelo, [grupo_original, grupo_horizonte], queue=False)
     demo.load(al_abrir, None, [*controles, perfil, estado_perfiles, apariencia]) \
         .then(None, apariencia, None, js=APLICAR_APARIENCIA)
     apariencia.input(guardar_apariencia, apariencia, None, js=APLICAR_APARIENCIA, queue=False)
@@ -345,4 +363,7 @@ if __name__ == "__main__":
     # Si se arranca en segundo plano (p. ej. desde el lanzador), el shell hace que
     # se ignore Ctrl + C; se restaura para que el botón "Cerrar aplicación" funcione.
     signal.signal(signal.SIGINT, signal.default_int_handler)
+    # Las texturas de suelo se generan en segundo plano para que el primer uso sea inmediato.
+    from fotos_minis.suelo import precargar
+    threading.Thread(target=precargar, daemon=True).start()
     demo.queue(default_concurrency_limit=1).launch(css=CSS)

@@ -21,7 +21,7 @@ FABRICA = "Valores de fábrica"
 CAMPOS_ESTUDIO = [
     "halo", "vineteado", "sombra", "reflejo", "reflejo_caida", "oscurecer_borde",
     "corregir_dominante", "negro", "reencuadrar", "margen", "proporcion",
-    "descontaminar_bordes", "horizonte", "horizonte_distancia", "horizonte_desenfoque",
+    "descontaminar_bordes", "suelo", "suelo_ajuste", "horizonte", "horizonte_distancia", "horizonte_desenfoque",
     "horizonte_suelo", "horizonte_altura",
 ]
 CAMPOS = ["modelo", "rellenar_huecos", *CAMPOS_ESTUDIO]
@@ -72,6 +72,9 @@ def _sanear(valores: dict) -> dict:
             base[k] = valores[k]
     if base["modelo"] not in MODELOS:
         base["modelo"] = MODELO_POR_DEFECTO
+    from .composicion import SUELOS
+    if base["suelo"] not in SUELOS:
+        base["suelo"] = "estudio"
     return base
 
 

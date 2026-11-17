@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from . import perfiles
-from .composicion import PROPORCIONES
+from .composicion import PROPORCIONES, SUELOS
 from .proceso import guardar, procesar
 from .segmentacion import MODELOS
 
@@ -22,7 +22,7 @@ OPCIONES = {
     "horizonte_desenfoque": "horizonte_desenfoque", "horizonte_suelo": "horizonte_suelo",
     "horizonte_altura": "horizonte_altura", "oscurecer_borde": "oscurecer_borde",
     "corregir_dominante": "corregir_dominante", "negro": "negro", "margen": "margen",
-    "proporcion": "proporcion",
+    "proporcion": "proporcion", "suelo": "suelo", "suelo_ajuste": "suelo_ajuste",
 }
 
 
@@ -41,6 +41,10 @@ def main(argv=None) -> None:
     p.add_argument("--vineteado", type=float)
     p.add_argument("--sombra", type=float, help="sombra de contacto (0-1)")
     p.add_argument("--reflejo", type=float, help="reflejo en suelo brillante (0-1)")
+    p.add_argument("--suelo", choices=list(SUELOS),
+                   help="estudio (generado), original (el de la foto), oscuro o arido (texturas)")
+    p.add_argument("--suelo-ajuste", type=float,
+                   help="con --suelo original: sube (+) o baja (-) la línea suelo-pared")
     p.add_argument("--horizonte", type=float, help="intensidad del paso suelo-pared (0 = sin horizonte)")
     p.add_argument("--horizonte-distancia", type=float, help="distancia de la pared, en diámetros de peana")
     p.add_argument("--horizonte-desenfoque", type=float)
