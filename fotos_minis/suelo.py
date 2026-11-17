@@ -89,9 +89,11 @@ def detectar_suelo(imagen: np.ndarray, alfa: np.ndarray) -> np.ndarray | None:
     # debe destacar sobre el típico de la foto.
     # Cerca de la figura el camino no es fiable (sigue el borde de la zona borrada):
     # allí se interpola en línea recta entre los tramos fiables de ambos lados.
-    cerca = cv2.dilate(sujeto, np.ones((max(int(hh * 0.05), 3),) * 2, np.uint8))
+    # Basta con que la línea se vea en los huecos entre figuras: en fotos de grupo
+    # (varias miniaturas a lo ancho) puede quedar a la vista sólo un 10 % del ancho.
+    cerca = cv2.dilate(sujeto, np.ones((max(int(hh * 0.025), 3),) * 2, np.uint8))
     libres = cerca[camino.astype(int), np.arange(ww)] == 0
-    if libres.sum() < ww * 0.25:
+    if libres.sum() < max(ww * 0.08, 16):
         return None
     a_lo_largo = fuerza[camino.astype(int), np.arange(ww)][libres]
     if np.median(a_lo_largo) < 2.5 * np.median(fuerza[fuerza > 0]):

@@ -70,3 +70,20 @@ def test_texturas_periodicas_y_suelo_bajo_el_horizonte():
         assert out[-30:, :60].std() > 2                   # y no es plano
         nucleo = alfa >= 1
         assert np.array_equal(out[nucleo], img[nucleo])   # la figura sigue intacta
+
+
+def test_foto_de_grupo_con_figuras_a_todo_lo_ancho():
+    """Varias miniaturas tapan casi toda la línea suelo-pared: basta con los huecos."""
+    img, _ = _escena()
+    img[:] = np.where(np.arange(H)[:, None, None] < LINEA, 170, 70).astype(np.uint8)
+    img = np.clip(img + np.random.default_rng(2).normal(0, 6, img.shape), 0, 255).astype(np.uint8)
+    alfa = np.zeros((H, W), np.float32)
+    yy, xx = np.mgrid[0:H, 0:W]
+    for cx in range(40, W, 64):                      # 6 figuras de 44 px con huecos de 20 px
+        sujeto = ((np.abs(xx - cx) < 22) & (yy > 70) & (yy < 200)) | \
+                 (((xx - cx) / 28) ** 2 + ((yy - 205) / 8) ** 2 <= 1)
+        img[sujeto] = (60, 150, 60)
+        alfa[sujeto] = 1
+    m = detectar_suelo(img, alfa)
+    assert m is not None
+    assert np.abs(np.median((m > 0.5).argmax(axis=0)) - LINEA) <= 4
