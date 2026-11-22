@@ -33,7 +33,8 @@ def main(argv=None) -> None:
                     "Por defecto usa el perfil marcado en la aplicación como «Usar al abrir»; "
                     "cualquier opción indicada aquí prevalece sobre el perfil.")
     p.add_argument("entrada", nargs="*", type=Path, help="fotos o carpetas")
-    p.add_argument("-o", "--salida", type=Path, default=Path("salida"), help="carpeta de salida")
+    p.add_argument("-o", "--salida", type=Path, default=Path("fotos"),
+                   help="carpeta de salida (por defecto «fotos», como la aplicación)")
     p.add_argument("--perfil", help=f"perfil guardado a usar («{perfiles.FABRICA}» para ninguno)")
     p.add_argument("--perfiles", action="store_true", help="muestra los perfiles guardados y sale")
     p.add_argument("--modelo", choices=list(MODELOS))

@@ -75,7 +75,7 @@ procesar varias fotos y descargarlas en un ZIP.
 
 ```bash
 # Una foto o una carpeta entera
-python -m fotos_minis fotos/ -o salida/
+python -m fotos_minis mis_fotos/          # resultados en fotos/
 
 # Con reflejo, formato cuadrado y PNG transparente adicional
 python -m fotos_minis mini.jpg --reflejo 0.35 --proporcion 1:1 --recorte
@@ -95,6 +95,19 @@ r = procesar("mini.jpg", OpcionesEstudio(reflejo=0.3, proporcion="4:5"))
 r.estudio.save("mini_estudio.png")
 r.recorte.save("mini_recorte.png")   # RGBA
 ```
+
+## Dónde se guardan los resultados
+
+Todo se guarda automáticamente en la carpeta **`fotos`** dentro de la carpeta desde la
+que se ejecuta la aplicación (con el lanzador, la del proyecto); se crea sola.
+
+- **Una foto**: `fotos/<nombre-original>_estudio.png`. Si sigues probando ajustes con la
+  misma foto original, el fichero se sobrescribe y sólo queda el último resultado; otra foto
+  original crea su propio fichero.
+- **Varias fotos**: el ZIP del lote, `fotos/fotos_estudio_<fecha_hora>.zip`.
+- **Línea de comandos**: también guarda en `fotos` por defecto (cámbialo con `-o`).
+
+La carpeta `fotos` está excluida de git, así que tus imágenes no se suben al repositorio.
 
 ## Tipos de suelo (pestaña «Fondo»)
 

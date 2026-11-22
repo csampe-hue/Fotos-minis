@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
+from datetime import datetime
 import signal
 import threading
 import tempfile
@@ -47,20 +49,50 @@ def _opciones(*ajustes) -> OpcionesEstudio:
     return perfiles.a_opciones(dict(zip(CAMPOS_ESTUDIO, ajustes)))[0]
 
 
-_ultima_firma: tuple | None = None
+# Última combinación (foto + ajustes) procesada en cada pestaña del navegador.
+_ultimas_firmas: dict[str, tuple] = {}
 
 
-def procesar_una(ruta, modelo, huecos, *ajustes, progress=gr.Progress()):
-    global _ultima_firma
+def _sesion(request: gr.Request | None) -> str:
+    return getattr(request, "session_hash", None) or "local"
+
+
+def carpeta_fotos() -> Path:
+    """Carpeta «fotos» junto a donde se ejecuta la aplicación (se crea si no existe)."""
+    carpeta = Path(os.environ.get("FOTOS_MINIS_SALIDA", Path.cwd() / "fotos"))
+    carpeta.mkdir(parents=True, exist_ok=True)
+    return carpeta
+
+
+def _guardar_copia(origen: Path, nombre: str) -> Path:
+    """Copia el resultado a la carpeta «fotos». Con el mismo nombre se sobrescribe:
+    al hacer varias pruebas con la misma foto original sólo queda la última."""
+    destino = carpeta_fotos() / nombre
+    tmp = destino.with_name(destino.name + ".tmp")
+    shutil.copyfile(origen, tmp)
+    tmp.replace(destino)  # sustitución atómica: nunca queda un fichero a medias
+    return destino
+
+
+def _aviso_guardado(ruta: Path) -> str:
+    try:
+        mostrar = ruta.relative_to(Path.cwd())
+    except ValueError:
+        mostrar = ruta
+    return f"Guardado automáticamente en `{mostrar}`"
+
+
+def procesar_una(ruta, modelo, huecos, *ajustes, request: gr.Request = None, progress=gr.Progress()):
+    sesion = _sesion(request)
     if ruta is None:
         # Al sustituir una foto por otra el componente pasa un instante por "vacío":
         # no se borra el resultado (sólo se borra al pulsar la X, ver limpiar()).
-        return gr.skip(), gr.skip(), gr.skip()
+        return gr.skip(), gr.skip(), gr.skip(), gr.skip()
     # Al aplicar un perfil cambian muchos controles a la vez y cada uno lanza un
     # evento: si los valores son los mismos que los del último resultado, no se repite.
     firma = (ruta, modelo, huecos, *ajustes)
-    if firma == _ultima_firma:
-        return gr.skip(), gr.skip(), gr.skip()
+    if firma == _ultimas_firmas.get(sesion):
+        return gr.skip(), gr.skip(), gr.skip(), gr.skip()
     img = cargar(ruta)
     arr = np.asarray(img)
     if _clave(arr, modelo, huecos) not in _cache_mascaras:
@@ -82,9 +114,17 @@ def procesar_una(ruta, modelo, huecos, *ajustes, progress=gr.Progress()):
     resultado = Image.fromarray(out)
     resultado.info.update(img.info)
     guardar(resultado, destino)
+    guardado = _guardar_copia(destino, destino.name)
     mascara = Image.fromarray(np.round(alfa * 255).astype(np.uint8))
-    _ultima_firma = firma
-    return (Image.fromarray(antes), Image.fromarray(out)), mascara, str(destino)
+    _ultimas_firmas[sesion] = firma
+    return ((Image.fromarray(antes), Image.fromarray(out)), mascara, str(destino),
+            _aviso_guardado(guardado))
+
+
+def procesar_desde_ui(request: gr.Request, progress=gr.Progress(), *entradas):
+    """Punto de entrada de la interfaz. Gradio sólo inyecta la sesión y la barra de
+    progreso en parámetros posicionales anteriores a *args, por eso van primero."""
+    return procesar_una(*entradas, request=request, progress=progress)
 
 
 # --------------------------------------------------------------------------- #
@@ -145,7 +185,7 @@ def borrar_perfil(nombre):
 
 def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
     if not ficheros:
-        return None
+        return None, ""
     op = _opciones(*ajustes)
     carpeta = Path(tempfile.mkdtemp())
     zip_path = carpeta / "fotos_estudio.zip"
@@ -155,14 +195,14 @@ def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
             nombre = f"{Path(f).stem}_estudio.png"
             guardar(r.estudio, carpeta / nombre)
             z.write(carpeta / nombre, nombre)
-    return str(zip_path)
+    guardado = _guardar_copia(zip_path, f"fotos_estudio_{datetime.now():%Y-%m-%d_%H-%M-%S}.zip")
+    return str(zip_path), _aviso_guardado(guardado)
 
 
-def limpiar():
+def limpiar(request: gr.Request = None):
     """La X de la foto original: se vacía también el resultado."""
-    global _ultima_firma
-    _ultima_firma = None
-    return None, None, None
+    _ultimas_firmas.pop(_sesion(request), None)
+    return None, None, None, ""
 
 
 def cerrar_aplicacion():
@@ -218,11 +258,12 @@ CSS = """
 #entrada .top-panel { z-index: 10; }
 /* Pestañas del panel compactas, para que quepan las cinco sin menú "⋯". */
 #panel .tab-wrapper button { padding: 6px 8px !important; font-size: 13px !important; }
+#guardado p { margin: 4px 0 0; font-size: 13px; opacity: .8; text-align: center; }
 #apariencia { width: 330px !important; min-width: 330px !important; flex: none !important; }
 #apariencia .wrap { flex-wrap: nowrap; gap: 6px; }
 #apariencia label { padding: 6px 10px !important; white-space: nowrap; }
 #visor-tabs .tabitem { padding: 0 !important; }
-#comparador, #mascara { height: calc(100vh - 260px) !important; min-height: 360px; }
+#comparador, #mascara { height: calc(100vh - 310px) !important; min-height: 360px; }
 /* Las imágenes ocupan todo el alto disponible del visor, sin deformarse. */
 #comparador .content, #comparador .content img,
 #mascara .image-container, #mascara img { height: 100% !important; max-height: none !important; }
@@ -319,6 +360,7 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                         with gr.Tab("Máscara", id="mascara_tab"):
                             mascara = gr.Image(show_label=False, type="pil", elem_id="mascara")
                     descarga = gr.DownloadButton("Descargar resultado (PNG sin pérdida)", variant="primary")
+                    guardado = gr.Markdown(elem_id="guardado")
 
         with gr.Tab("Varias fotos", id="varias"):
             gr.Markdown("Se procesan con los ajustes elegidos en la pestaña **Una foto**.")
@@ -328,19 +370,20 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                 with gr.Column(scale=1, min_width=260):
                     boton_lote = gr.Button("Procesar todas", variant="primary")
                     zip_salida = gr.File(label="ZIP con los resultados")
+                    guardado_lote = gr.Markdown()
 
     ajustes = [halo, vineteado, sombra, reflejo, caida, oscurecer, dominante, negro, reencuadrar,
                margen, proporcion, descontaminar, suelo, suelo_ajuste, horizonte, h_distancia, h_desenfoque,
                h_suelo, h_altura]
     entradas = [entrada, modelo, huecos, *ajustes]
-    salidas = [comparador, mascara, descarga]
-    boton.click(procesar_una, entradas, salidas)
-    entrada.change(procesar_una, entradas, salidas)
+    salidas = [comparador, mascara, descarga, guardado]
+    boton.click(procesar_desde_ui, entradas, salidas)
+    entrada.change(procesar_desde_ui, entradas, salidas)
     entrada.clear(limpiar, None, salidas)
     # "always_last": al arrastrar un control sólo se procesa el último valor, y
     # también reacciona cuando se escribe el número en la casilla.
     for c in [*ajustes, modelo, huecos]:
-        c.change(procesar_una, entradas, salidas, trigger_mode="always_last", show_progress="minimal")
+        c.change(procesar_desde_ui, entradas, salidas, trigger_mode="always_last", show_progress="minimal")
     controles = [modelo, huecos, *ajustes]  # mismo orden que perfiles.CAMPOS
     suelo.change(lambda v: (gr.update(visible=v == "original"), gr.update(visible=v != "original")),
                  suelo, [grupo_original, grupo_horizonte], queue=False)
@@ -348,7 +391,7 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
         .then(None, apariencia, None, js=APLICAR_APARIENCIA)
     apariencia.input(guardar_apariencia, apariencia, None, js=APLICAR_APARIENCIA, queue=False)
     b_aplicar.click(aplicar_perfil, perfil, [*controles, estado_perfiles]) \
-        .then(procesar_una, entradas, salidas)
+        .then(procesar_desde_ui, entradas, salidas)
     b_guardar.click(guardar_perfil, [nombre_perfil, con_al_abrir, *controles],
                     [perfil, nombre_perfil, estado_perfiles])
     nombre_perfil.submit(guardar_perfil, [nombre_perfil, con_al_abrir, *controles],
@@ -356,7 +399,7 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
     b_al_abrir.click(usar_al_abrir, perfil, estado_perfiles)
     b_borrar.click(borrar_perfil, perfil, [perfil, estado_perfiles])
     boton_cerrar.click(cerrar_aplicacion, None, boton_cerrar, js=AVISO_CIERRE, queue=False)
-    boton_lote.click(procesar_lote, [lote, modelo, huecos, *ajustes], zip_salida)
+    boton_lote.click(procesar_lote, [lote, modelo, huecos, *ajustes], [zip_salida, guardado_lote])
 
 
 if __name__ == "__main__":
