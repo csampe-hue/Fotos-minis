@@ -230,11 +230,18 @@ def limpiar(request: gr.Request = None):
     return None, None, None, ""
 
 
+# En la aplicación de escritorio (escritorio.py) cerrar consiste en cerrar su ventana.
+AL_CERRAR = None
+
+
 def cerrar_aplicacion():
     """Detiene el servidor de forma ordenada: equivale a pulsar Ctrl + C en la terminal
     (Gradio cierra el servidor y el programa termina). Se hace con un pequeño retraso
     para que el navegador reciba antes la respuesta."""
-    threading.Timer(0.8, lambda: os.kill(os.getpid(), signal.SIGINT)).start()
+    if AL_CERRAR is not None:
+        threading.Timer(0.8, AL_CERRAR).start()
+    else:
+        threading.Timer(0.8, lambda: os.kill(os.getpid(), signal.SIGINT)).start()
     return gr.update(value="Cerrando…", interactive=False)
 
 

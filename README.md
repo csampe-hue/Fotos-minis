@@ -51,6 +51,19 @@ Memoria: el modo combinado (por defecto) necesita unos **9 GB de RAM** en CPU
 
 ## Uso
 
+### Como aplicación de Mac (recomendado)
+
+Haz doble clic en **`Instalar app en Aplicaciones.command`** (la primera vez, clic
+derecho → Abrir). Prepara lo necesario y crea **Fotos Minis.app** en Aplicaciones, con su
+icono: aparece en Launchpad y puedes arrastrarla al Dock. Al abrirla se muestra en **su
+propia ventana**, sin navegador ni ventana de Terminal; al cerrar la ventana (o con
+«Cerrar aplicación») se detiene todo.
+
+- La app usa esta carpeta del programa: si la mueves, vuelve a ejecutar el instalador.
+- Tras actualizar el programa no hace falta reinstalar la app (sólo si cambia este apartado).
+- Registro de arranque y errores: `~/.fotos-minis/app.log`.
+- Si la ventana propia no pudiera abrirse, la app se abre en el navegador.
+
 ### Arranque con doble clic (Mac)
 
 Haz doble clic en **`Iniciar Fotos Minis.command`**. La primera vez prepara el entorno
