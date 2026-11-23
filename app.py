@@ -21,6 +21,8 @@ from fotos_minis.composicion import (PROPORCIONES, SUELOS, OpcionesEstudio, _peg
                                      descontaminar as limpiar_primer_plano)
 from fotos_minis import perfiles, preferencias
 from fotos_minis.perfiles import CAMPOS_ESTUDIO, FABRICA
+from fotos_minis.carrusel import borrar_partes, dividir, nombre_parte, partes_recomendadas
+from fotos_minis.composicion import caja_sujeto
 from fotos_minis.proceso import cargar, guardar, procesar
 from fotos_minis.segmentacion import MODELO_POR_DEFECTO, MODELOS, mascara_bruta, refinar_mascara
 
@@ -112,12 +114,12 @@ def procesar_una(ruta, modelo, huecos, *ajustes, request: gr.Request = None, pro
     if ruta is None:
         # Al sustituir una foto por otra el componente pasa un instante por "vacío":
         # no se borra el resultado (sólo se borra al pulsar la X, ver limpiar()).
-        return gr.skip(), gr.skip(), gr.skip(), gr.skip()
+        return gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
     # Al aplicar un perfil cambian muchos controles a la vez y cada uno lanza un
     # evento: si los valores son los mismos que los del último resultado, no se repite.
     firma = (ruta, modelo, huecos, *ajustes)
     if firma == _ultimas_firmas.get(sesion):
-        return gr.skip(), gr.skip(), gr.skip(), gr.skip()
+        return gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
     img = cargar(ruta)
     arr = np.asarray(img)
     if _clave(arr, modelo, huecos) not in _cache_mascaras:
@@ -135,15 +137,47 @@ def procesar_una(ruta, modelo, huecos, *ajustes, request: gr.Request = None, pro
     ox, oy, W, H = calcular_lienzo(alfa, op, dentro_de_la_foto=suelo_m is not None)
     antes = np.zeros((H, W, 3), np.uint8)
     _pegar(antes, arr, ox, oy)
-    destino = Path(tempfile.mkdtemp()) / f"{Path(ruta).stem}_estudio.png"
+    base = Path(ruta).stem
+    temporal = Path(tempfile.mkdtemp())
+    destino = temporal / f"{base}_estudio.png"
     resultado = Image.fromarray(out)
     resultado.info.update(img.info)
     guardar(resultado, destino)
     guardado = _guardar_copia(destino, destino.name)
+    aviso = _aviso_guardado(guardado)
+    descarga = destino
+
+    # Carrusel: además de la imagen completa (sin cortar) se guardan las N partes
+    # cuadradas. Las partes de pruebas anteriores de esta foto se eliminan siempre.
+    borrar_partes(carpeta_fotos(), base)
+    galeria = None
+    n = op.carrusel if op.carrusel in (2, 3, 4) else 0
+    if n:
+        a_l = np.zeros((H, W), np.float32)
+        _pegar(a_l, alfa, ox, oy)
+        x0, y0, x1, y1 = caja_sujeto(a_l, umbral=0.5)
+        if (alfa > 0.5).sum() > (a_l > 0.5).sum() * 1.01:
+            gr.Warning("La foto no es lo bastante ancha para este carrusel sin salirse de ella: "
+                       "parte de las figuras queda fuera. Prueba con menos partes o con suelo de estudio.")
+        galeria = []
+        descarga = temporal / f"{base}_carrusel.zip"
+        with zipfile.ZipFile(descarga, "w") as z:
+            z.write(destino, destino.name)
+            for i, parte in enumerate(dividir(resultado, n), 1):
+                nombre = nombre_parte(base, i, n)
+                guardar(parte, temporal / nombre)
+                _guardar_copia(temporal / nombre, nombre)
+                z.write(temporal / nombre, nombre)
+                galeria.append((str(temporal / nombre), f"{i} de {n}"))
+        aviso += f" y las {n} partes del carrusel (`{nombre_parte(base, 1, n)}`…)"
+        bx0, by0, bx1, by1 = caja_sujeto(alfa, umbral=0.5)
+        mejor = partes_recomendadas(bx1 - bx0, by1 - by0, op.margen)
+        if mejor != n:
+            aviso += f". Para esta foto, con **{mejor} partes** las minis ocuparían más espacio."
+
     mascara = Image.fromarray(np.round(alfa * 255).astype(np.uint8))
     _ultimas_firmas[sesion] = firma
-    return ((Image.fromarray(antes), Image.fromarray(out)), mascara, str(destino),
-            _aviso_guardado(guardado))
+    return ((Image.fromarray(antes), Image.fromarray(out)), mascara, str(descarga), aviso, galeria)
 
 
 def procesar_desde_ui(request: gr.Request, progress=gr.Progress(), *entradas):
@@ -220,6 +254,11 @@ def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
             nombre = f"{Path(f).stem}_estudio.png"
             guardar(r.estudio, carpeta / nombre)
             z.write(carpeta / nombre, nombre)
+            if op.carrusel in (2, 3, 4):
+                for i, parte in enumerate(dividir(r.estudio, op.carrusel), 1):
+                    nombre = nombre_parte(Path(f).stem, i, op.carrusel)
+                    guardar(parte, carpeta / nombre)
+                    z.write(carpeta / nombre, nombre)
     guardado = _guardar_copia(zip_path, f"fotos_estudio_{datetime.now():%Y-%m-%d_%H-%M-%S}.zip")
     return str(zip_path), _aviso_guardado(guardado)
 
@@ -227,7 +266,7 @@ def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
 def limpiar(request: gr.Request = None):
     """La X de la foto original: se vacía también el resultado."""
     _ultimas_firmas.pop(_sesion(request), None)
-    return None, None, None, ""
+    return None, None, None, "", None
 
 
 # En la aplicación de escritorio (escritorio.py) cerrar consiste en cerrar su ventana.
@@ -297,7 +336,7 @@ CSS = """
 #apariencia .wrap { flex-wrap: nowrap; gap: 6px; }
 #apariencia label { padding: 6px 10px !important; white-space: nowrap; }
 #visor-tabs .tabitem { padding: 0 !important; }
-#comparador, #mascara { height: calc(100vh - 405px) !important; min-height: 360px; }
+#comparador, #mascara, #galeria { height: calc(100vh - 405px) !important; min-height: 360px; }
 /* Las imágenes ocupan todo el alto disponible del visor, sin deformarse. */
 #comparador .content, #comparador .content img,
 #mascara .image-container, #mascara img { height: 100% !important; max-height: none !important; }
@@ -306,7 +345,7 @@ CSS = """
   #cabecera { flex-wrap: wrap !important; }
   #titulo { flex: 1 1 100% !important; min-width: 100% !important; }
   #panel { position: static; max-height: none; overflow: visible; }
-  #comparador, #mascara { height: 70vh !important; }
+  #comparador, #mascara, #galeria { height: 70vh !important; }
 }
 """
 
@@ -384,7 +423,11 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                             reencuadrar = gr.Checkbox(True, label="Centrar la figura (sin reescalarla)")
                             margen = gr.Slider(0, 0.5, 0.12, step=0.01, label="Margen")
                             proporcion = gr.Dropdown(["original", *PROPORCIONES], value="original",
-                                                     label="Proporción")
+                                                     label="Proporción", info="Sin carrusel")
+                            carrusel = gr.Radio([("No", 0), ("2 partes", 2), ("3 partes", 3), ("4 partes", 4)],
+                                                value=0, label="Carrusel de Instagram",
+                                                info="Imagen N:1 dividida en N cuadrados que, al deslizar, "
+                                                     "se ven como una sola imagen continua")
 
                 # ---------------- Visor ----------------
                 with gr.Column(scale=3, min_width=480):
@@ -393,7 +436,11 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                             comparador = gr.ImageSlider(show_label=False, type="pil", elem_id="comparador")
                         with gr.Tab("Máscara", id="mascara_tab"):
                             mascara = gr.Image(show_label=False, type="pil", elem_id="mascara")
-                    descarga = gr.DownloadButton("Descargar resultado (PNG sin pérdida)", variant="primary")
+                        with gr.Tab("Carrusel", id="carrusel_tab"):
+                            galeria = gr.Gallery(show_label=False, columns=4, object_fit="contain",
+                                                 elem_id="galeria", allow_preview=True)
+                    descarga = gr.DownloadButton("Descargar resultado (PNG sin pérdida; ZIP en modo carrusel)",
+                                                 variant="primary")
                     guardado = gr.Markdown(elem_id="guardado")
                     with gr.Row(elem_id="fila-carpeta"):
                         carpeta = gr.Textbox(label="Carpeta de guardado (se recuerda para la próxima vez)",
@@ -415,9 +462,9 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
 
     ajustes = [halo, vineteado, sombra, reflejo, caida, oscurecer, dominante, negro, reencuadrar,
                margen, proporcion, descontaminar, suelo, suelo_ajuste, horizonte, h_distancia, h_desenfoque,
-               h_suelo, h_altura]
+               h_suelo, h_altura, carrusel]
     entradas = [entrada, modelo, huecos, *ajustes]
-    salidas = [comparador, mascara, descarga, guardado]
+    salidas = [comparador, mascara, descarga, guardado, galeria]
     boton.click(procesar_desde_ui, entradas, salidas)
     entrada.change(procesar_desde_ui, entradas, salidas)
     entrada.clear(limpiar, None, salidas)

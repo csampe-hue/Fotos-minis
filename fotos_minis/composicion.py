@@ -44,6 +44,7 @@ class OpcionesEstudio:
     reencuadrar: bool = True
     margen: float = 0.12            # margen alrededor del sujeto (fracción del lado mayor)
     proporcion: str = "original"    # "original", "1:1", "4:5", "3:2", "2:3", "16:9"
+    carrusel: int = 0               # 2, 3 o 4: imagen N:1 para dividir en N cuadrados (Instagram)
 
 
 SUELOS = {
@@ -341,7 +342,8 @@ def calcular_lienzo(alfa: np.ndarray, op: OpcionesEstudio,
     foto: así el suelo no termina en seco contra el negro.
     """
     h, w = alfa.shape
-    if not op.reencuadrar:
+    n = op.carrusel if op.carrusel in (2, 3, 4) else 0
+    if not op.reencuadrar and not n:
         return 0, 0, w, h
     # Caja de la parte sólida del sujeto: las penumbras débiles del contorno (p. ej.
     # restos de sombra) no deben desplazar el centrado.
@@ -352,7 +354,9 @@ def calcular_lienzo(alfa: np.ndarray, op: OpcionesEstudio,
     # Lienzo simétrico: el sujeto queda centrado en horizontal y en vertical. Si hay
     # reflejo, el margen inferior (y por simetría el superior) crece para que quepa.
     W, H = bw + 2 * m, int(bh + 2 * (m + extra_inf))
-    prop = PROPORCIONES.get(op.proporcion)
+    # Carrusel: proporción N:1 exacta (N cuadrados seguidos), lo más ajustada posible
+    # al sujeto con el margen indicado.
+    prop = float(n) if n else PROPORCIONES.get(op.proporcion)
     if prop is None:
         prop = w / h
     if W / H < prop:
@@ -362,10 +366,16 @@ def calcular_lienzo(alfa: np.ndarray, op: OpcionesEstudio,
     if dentro_de_la_foto:
         escala = min(1.0, w / W, h / H)
         W, H = max(int(W * escala), 2), max(int(H * escala), 2)
+        if n:
+            H = max(min(H, h, w // n), 2)
+            W = n * H
         xi = int(np.clip(round((x0 + x1) / 2 - W / 2), 0, w - W))
         yi = int(np.clip(round((y0 + y1) / 2 - H / 2), 0, h - H))
         return -xi, -yi, W, H
-    W, H = W + W % 2, H + H % 2
+    if n:
+        W = n * H                    # ancho exacto: cada parte es un cuadrado H×H
+    else:
+        W, H = W + W % 2, H + H % 2
     ox = int(round((W - bw) / 2)) - x0
     oy = int(round((H - bh) / 2)) - y0
     return ox, oy, W, H

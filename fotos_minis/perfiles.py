@@ -22,7 +22,7 @@ CAMPOS_ESTUDIO = [
     "halo", "vineteado", "sombra", "reflejo", "reflejo_caida", "oscurecer_borde",
     "corregir_dominante", "negro", "reencuadrar", "margen", "proporcion",
     "descontaminar_bordes", "suelo", "suelo_ajuste", "horizonte", "horizonte_distancia", "horizonte_desenfoque",
-    "horizonte_suelo", "horizonte_altura",
+    "horizonte_suelo", "horizonte_altura", "carrusel",
 ]
 CAMPOS = ["modelo", "rellenar_huecos", *CAMPOS_ESTUDIO]
 
@@ -75,6 +75,10 @@ def _sanear(valores: dict) -> dict:
     from .composicion import SUELOS
     if base["suelo"] not in SUELOS:
         base["suelo"] = "estudio"
+    try:
+        base["carrusel"] = int(base["carrusel"]) if int(base["carrusel"]) in (2, 3, 4) else 0
+    except (TypeError, ValueError):
+        base["carrusel"] = 0
     return base
 
 
