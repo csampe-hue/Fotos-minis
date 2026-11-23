@@ -33,8 +33,8 @@ def main(argv=None) -> None:
                     "Por defecto usa el perfil marcado en la aplicación como «Usar al abrir»; "
                     "cualquier opción indicada aquí prevalece sobre el perfil.")
     p.add_argument("entrada", nargs="*", type=Path, help="fotos o carpetas")
-    p.add_argument("-o", "--salida", type=Path, default=Path("fotos"),
-                   help="carpeta de salida (por defecto «fotos», como la aplicación)")
+    p.add_argument("-o", "--salida", type=Path,
+                   help="carpeta de salida (por defecto, la última elegida en la aplicación)")
     p.add_argument("--perfil", help=f"perfil guardado a usar («{perfiles.FABRICA}» para ninguno)")
     p.add_argument("--perfiles", action="store_true", help="muestra los perfiles guardados y sale")
     p.add_argument("--modelo", choices=list(MODELOS))
@@ -91,6 +91,10 @@ def main(argv=None) -> None:
     ficheros = []
     for e in a.entrada:
         ficheros += sorted(f for f in e.rglob("*") if f.suffix.lower() in EXTS) if e.is_dir() else [e]
+    if a.salida is None:
+        from .preferencias import carpeta_guardado
+        a.salida = carpeta_guardado()
+    print(f"Guardando en: {a.salida}")
     a.salida.mkdir(parents=True, exist_ok=True)
     for i, f in enumerate(ficheros, 1):
         print(f"[{i}/{len(ficheros)}] {f}", flush=True)

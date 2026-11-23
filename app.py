@@ -58,10 +58,8 @@ def _sesion(request: gr.Request | None) -> str:
 
 
 def carpeta_fotos() -> Path:
-    """Carpeta «fotos» junto a donde se ejecuta la aplicación (se crea si no existe)."""
-    carpeta = Path(os.environ.get("FOTOS_MINIS_SALIDA", Path.cwd() / "fotos"))
-    carpeta.mkdir(parents=True, exist_ok=True)
-    return carpeta
+    """Carpeta de guardado elegida por el usuario (la última utilizada)."""
+    return preferencias.carpeta_guardado()
 
 
 def _guardar_copia(origen: Path, nombre: str) -> Path:
@@ -76,10 +74,37 @@ def _guardar_copia(origen: Path, nombre: str) -> Path:
 
 def _aviso_guardado(ruta: Path) -> str:
     try:
-        mostrar = ruta.relative_to(Path.cwd())
+        mostrar = ruta.relative_to(Path.home())
+        mostrar = f"~/{mostrar}"
     except ValueError:
         mostrar = ruta
     return f"Guardado automáticamente en `{mostrar}`"
+
+
+def cambiar_carpeta(texto):
+    actual = carpeta_fotos()
+    if texto and Path(str(texto).strip()).expanduser() == actual:
+        return gr.skip()  # sin cambios (p. ej. al salir del campo tras pulsar Intro)
+    try:
+        carpeta = preferencias.fijar_carpeta_guardado(texto)
+    except ValueError as e:
+        gr.Warning(str(e))
+        return str(carpeta_fotos())
+    gr.Info(f"Las fotos se guardarán en {carpeta}")
+    return str(carpeta)
+
+
+def elegir_carpeta(actual):
+    elegida = preferencias.elegir_carpeta_sistema(Path(actual) if actual else carpeta_fotos())
+    if elegida is None:
+        return gr.skip()
+    return cambiar_carpeta(elegida)
+
+
+def abrir_carpeta():
+    carpeta = carpeta_fotos()
+    if not preferencias.abrir_en_explorador(carpeta):
+        gr.Info(f"Carpeta: {carpeta}")
 
 
 def procesar_una(ruta, modelo, huecos, *ajustes, request: gr.Request = None, progress=gr.Progress()):
@@ -148,7 +173,7 @@ def al_abrir():
     """Al cargar la página se aplican los ajustes del perfil predeterminado."""
     nombre = perfiles.predeterminado()
     return [*_valores_controles(perfiles.obtener(nombre)), _opciones_perfil(nombre),
-            _estado_perfiles(), preferencias.apariencia()]
+            _estado_perfiles(), preferencias.apariencia(), str(carpeta_fotos())]
 
 
 def guardar_apariencia(modo):
@@ -258,12 +283,14 @@ CSS = """
 #entrada .top-panel { z-index: 10; }
 /* Pestañas del panel compactas, para que quepan las cinco sin menú "⋯". */
 #panel .tab-wrapper button { padding: 6px 8px !important; font-size: 13px !important; }
+#fila-carpeta { align-items: flex-end; gap: 8px; }
+#fila-carpeta > button { height: 38px; margin-bottom: 2px; }
 #guardado p { margin: 4px 0 0; font-size: 13px; opacity: .8; text-align: center; }
 #apariencia { width: 330px !important; min-width: 330px !important; flex: none !important; }
 #apariencia .wrap { flex-wrap: nowrap; gap: 6px; }
 #apariencia label { padding: 6px 10px !important; white-space: nowrap; }
 #visor-tabs .tabitem { padding: 0 !important; }
-#comparador, #mascara { height: calc(100vh - 310px) !important; min-height: 360px; }
+#comparador, #mascara { height: calc(100vh - 405px) !important; min-height: 360px; }
 /* Las imágenes ocupan todo el alto disponible del visor, sin deformarse. */
 #comparador .content, #comparador .content img,
 #mascara .image-container, #mascara img { height: 100% !important; max-height: none !important; }
@@ -361,9 +388,16 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                             mascara = gr.Image(show_label=False, type="pil", elem_id="mascara")
                     descarga = gr.DownloadButton("Descargar resultado (PNG sin pérdida)", variant="primary")
                     guardado = gr.Markdown(elem_id="guardado")
+                    with gr.Row(elem_id="fila-carpeta"):
+                        carpeta = gr.Textbox(label="Carpeta de guardado (se recuerda para la próxima vez)",
+                                             scale=5, max_lines=1, elem_id="carpeta",
+                                             placeholder="Escribe o pega una ruta, o pulsa Elegir…")
+                        b_elegir = gr.Button("Elegir…", scale=0, min_width=90, size="sm")
+                        b_abrir = gr.Button("Abrir", scale=0, min_width=80, size="sm")
 
         with gr.Tab("Varias fotos", id="varias"):
-            gr.Markdown("Se procesan con los ajustes elegidos en la pestaña **Una foto**.")
+            gr.Markdown("Se procesan con los ajustes elegidos en la pestaña **Una foto**, y el ZIP "
+                        "se guarda en la carpeta de guardado indicada allí.")
             with gr.Row(equal_height=True):
                 lote = gr.File(file_count="multiple", file_types=["image", ".heic", ".heif"],
                                label="Fotos", scale=2)
@@ -387,8 +421,13 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
     controles = [modelo, huecos, *ajustes]  # mismo orden que perfiles.CAMPOS
     suelo.change(lambda v: (gr.update(visible=v == "original"), gr.update(visible=v != "original")),
                  suelo, [grupo_original, grupo_horizonte], queue=False)
-    demo.load(al_abrir, None, [*controles, perfil, estado_perfiles, apariencia]) \
+    demo.load(al_abrir, None, [*controles, perfil, estado_perfiles, apariencia, carpeta]) \
         .then(None, apariencia, None, js=APLICAR_APARIENCIA)
+    # Por la cola (no queue=False): sólo así Gradio muestra los avisos gr.Info/gr.Warning.
+    carpeta.submit(cambiar_carpeta, carpeta, carpeta)
+    carpeta.blur(cambiar_carpeta, carpeta, carpeta)
+    b_elegir.click(elegir_carpeta, carpeta, carpeta)
+    b_abrir.click(abrir_carpeta, None, None, queue=False)
     apariencia.input(guardar_apariencia, apariencia, None, js=APLICAR_APARIENCIA, queue=False)
     b_aplicar.click(aplicar_perfil, perfil, [*controles, estado_perfiles]) \
         .then(procesar_desde_ui, entradas, salidas)
