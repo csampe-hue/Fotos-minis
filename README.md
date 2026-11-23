@@ -63,6 +63,11 @@ propia ventana**, sin navegador ni ventana de Terminal; al cerrar la ventana (o 
 - Tras actualizar el programa no hace falta reinstalar la app (sólo si cambia este apartado).
 - Registro de arranque y errores: `~/.fotos-minis/app.log`.
 - Si la ventana propia no pudiera abrirse, la app se abre en el navegador.
+- **Icono propio**: al ejecutar el instalador, arrastra a la ventana de Terminal una imagen
+  (JPG, PNG o HEIC; mejor un primer plano de una sola miniatura) y pulsa Intro. Se recorta en
+  cuadrado con las esquinas de los iconos de macOS y se recuerda en las siguientes
+  instalaciones; escribe `original` para volver al icono por defecto. Si el Dock sigue
+  mostrando el anterior, quita la app del Dock y vuelve a añadirla.
 
 ### Arranque con doble clic (Mac)
 

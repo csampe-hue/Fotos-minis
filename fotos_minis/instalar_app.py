@@ -6,6 +6,7 @@ interfaz en una ventana propia. Si se mueve la carpeta del programa, basta con v
 a ejecutar el instalador.
 
 Uso:  .venv/bin/python -m fotos_minis.instalar_app [--destino CARPETA]
+                                                  [--icono IMAGEN | --icono-predeterminado]
 """
 
 from __future__ import annotations
@@ -13,10 +14,14 @@ from __future__ import annotations
 import argparse
 import os
 import plistlib
+import re
 import shutil
 import stat
 from pathlib import Path
 
+from PIL import Image
+
+from .icono import desde_imagen
 from .icono import guardar as guardar_icono
 
 NOMBRE = "Fotos Minis"
@@ -82,7 +87,47 @@ def _citar(ruta: Path) -> str:
     return "'" + str(ruta).replace("'", "'\\''") + "'"
 
 
-def crear_app(destino: Path, proyecto: Path = PROYECTO) -> Path:
+def icono_personal(proyecto: Path = PROYECTO) -> Path:
+    """Icono propio ya preparado (se reutiliza en cada reinstalación)."""
+    return proyecto / "recursos" / "mi_icono.png"
+
+
+def icono_en_uso(proyecto: Path = PROYECTO) -> Path:
+    """Imagen que muestra el Dock mientras la app está abierta (la lee escritorio.py)."""
+    return proyecto / "recursos" / "icono_app.png"
+
+
+def limpiar_ruta(texto: str) -> Path:
+    """Ruta tal como la deja Terminal al arrastrar un fichero: puede venir entre
+    comillas y con los espacios escapados («Mi\\ foto.jpg»)."""
+    t = texto.strip()
+    if len(t) >= 2 and t[0] == t[-1] and t[0] in "'\"":
+        t = t[1:-1]
+    else:
+        t = re.sub(r"\\(.)", r"\1", t)
+    return Path(t).expanduser()
+
+
+def elegir_icono(proyecto: Path, icono: Path | None = None, predeterminado: bool = False) -> Image.Image:
+    """Icono que tendrá la app: una imagen nueva (que se recuerda), el propio
+    elegido antes, o el predeterminado."""
+    personal = icono_personal(proyecto)
+    if predeterminado and personal.exists():
+        personal.unlink()
+    if icono is not None:
+        if not icono.is_file():
+            raise FileNotFoundError(f"No existe la imagen {icono}")
+        im = desde_imagen(icono)
+        personal.parent.mkdir(parents=True, exist_ok=True)
+        im.save(personal)
+        return im
+    if personal.exists():
+        return Image.open(personal).convert("RGBA")
+    return guardar_icono(proyecto / "recursos" / "icono.png")
+
+
+def crear_app(destino: Path, proyecto: Path = PROYECTO, icono: Path | None = None,
+              icono_predeterminado: bool = False) -> Path:
     app = destino / f"{NOMBRE}.app"
     if app.exists():
         shutil.rmtree(app)
@@ -94,7 +139,9 @@ def crear_app(destino: Path, proyecto: Path = PROYECTO) -> Path:
     ejecutable = contenido / "MacOS" / EJECUTABLE
     ejecutable.write_text(GUION.format(proyecto=_citar(proyecto)), encoding="utf-8")
     ejecutable.chmod(ejecutable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    guardar_icono(proyecto / "recursos" / "icono.png", contenido / "Resources" / "icono.icns")
+    im = elegir_icono(proyecto, icono, icono_predeterminado)
+    guardar_icono(icono_en_uso(proyecto), contenido / "Resources" / "icono.icns", im)
+    os.utime(app)  # para que el Finder y el Dock refresquen el icono
     return app
 
 
@@ -111,8 +158,15 @@ def destino_por_defecto() -> Path:
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--destino", type=Path, help="carpeta donde crear la app (por defecto, Aplicaciones)")
+    p.add_argument("--icono", help="imagen para el icono (JPG, PNG, HEIC...); se recuerda")
+    p.add_argument("--icono-predeterminado", action="store_true", help="vuelve al icono original")
     a = p.parse_args(argv)
-    app = crear_app(a.destino or destino_por_defecto())
+    icono = limpiar_ruta(a.icono) if a.icono and a.icono.strip() else None
+    try:
+        app = crear_app(a.destino or destino_por_defecto(), icono=icono,
+                        icono_predeterminado=a.icono_predeterminado)
+    except FileNotFoundError as e:
+        raise SystemExit(str(e))
     print(f"Creada: {app}")
 
 

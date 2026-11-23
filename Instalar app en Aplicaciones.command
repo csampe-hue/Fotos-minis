@@ -18,7 +18,20 @@ fi
 echo "Instalando o actualizando las librerías (incluida la ventana propia)..."
 VIRTUAL_ENV="$PWD/.venv" uv pip install -r requirements.txt || fallo "no se pudieron instalar las librerías."
 
-.venv/bin/python -m fotos_minis.instalar_app || fallo "no se pudo crear la aplicación."
+echo
+echo "Icono de la app:"
+echo "  · Para usar una imagen tuya, arrastra aquí el archivo (JPG, PNG o HEIC) y pulsa Intro."
+echo "  · Escribe «original» para volver al icono por defecto."
+echo "  · Pulsa Intro sin más para dejar el que tenga."
+read -r -p "> " ICONO
+if [ "$ICONO" = "original" ]; then
+    ARGS=(--icono-predeterminado)
+elif [ -n "$ICONO" ]; then
+    ARGS=(--icono "$ICONO")
+else
+    ARGS=()
+fi
+.venv/bin/python -m fotos_minis.instalar_app "${ARGS[@]}" || fallo "no se pudo crear la aplicación."
 APP="/Applications/Fotos Minis.app"; [ -d "$APP" ] || APP="$HOME/Applications/Fotos Minis.app"
 echo
 echo "Listo: ya tienes «Fotos Minis» en Aplicaciones (y en Launchpad)."

@@ -5,3 +5,5 @@ salida/
 *.egg-info/
 .gradio/
 fotos/
+recursos/mi_icono.png
+recursos/icono_app.png

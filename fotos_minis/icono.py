@@ -74,13 +74,34 @@ def generar() -> Image.Image:
     return img.resize((LADO, LADO), Image.LANCZOS)
 
 
-def guardar(png: Path, icns: Path | None = None) -> None:
-    im = generar()
+def desde_imagen(ruta: Path) -> Image.Image:
+    """Icono a partir de una imagen propia (JPG, PNG, HEIC...): recorte cuadrado
+    centrado y esquinas redondeadas con las proporciones de los iconos de macOS."""
+    from .proceso import cargar
+
+    im = cargar(ruta)
+    w, h = im.size
+    lado = min(w, h)
+    im = im.crop(((w - lado) // 2, (h - lado) // 2, (w - lado) // 2 + lado, (h - lado) // 2 + lado))
+    interior = 824                                    # rejilla de iconos de macOS: 824 de 1024
+    im = im.resize((interior * SS, interior * SS), Image.LANCZOS).convert("RGBA")
+    mascara = Image.new("L", im.size, 0)
+    ImageDraw.Draw(mascara).rounded_rectangle((0, 0, *im.size), radius=185 * SS, fill=255)
+    im.putalpha(mascara)
+    im = im.resize((interior, interior), Image.LANCZOS)
+    lienzo = Image.new("RGBA", (LADO, LADO), (0, 0, 0, 0))
+    lienzo.alpha_composite(im, ((LADO - interior) // 2, (LADO - interior) // 2))
+    return lienzo
+
+
+def guardar(png: Path, icns: Path | None = None, imagen: Image.Image | None = None) -> Image.Image:
+    im = imagen if imagen is not None else generar()
     png.parent.mkdir(parents=True, exist_ok=True)
     im.save(png)
     if icns is not None:
         icns.parent.mkdir(parents=True, exist_ok=True)
         im.save(icns)  # Pillow genera todos los tamaños del .icns
+    return im
 
 
 if __name__ == "__main__":

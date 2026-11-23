@@ -18,7 +18,9 @@ from pathlib import Path
 
 PUERTO = 7860
 URL = f"http://127.0.0.1:{PUERTO}"
-ICONO = Path(__file__).resolve().parent / "recursos" / "icono.png"
+_RECURSOS = Path(__file__).resolve().parent / "recursos"
+ICONO = next((p for p in (_RECURSOS / "icono_app.png", _RECURSOS / "icono.png") if p.exists()),
+             _RECURSOS / "icono.png")
 
 
 def responde(url: str = URL) -> bool:
