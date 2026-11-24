@@ -44,7 +44,8 @@ class OpcionesEstudio:
     reencuadrar: bool = True
     margen: float = 0.12            # margen alrededor del sujeto (fracción del lado mayor)
     proporcion: str = "original"    # "original", "1:1", "4:5", "3:2", "2:3", "16:9"
-    carrusel: int = 0               # 2, 3 o 4: imagen N:1 para dividir en N cuadrados (Instagram)
+    carrusel: int = 0               # 2, 3 o 4: imagen N:1 para dividir en N cuadrados (Instagram);
+                                    # -1 = automático (el N con el que las minis ocupan más área)
 
 
 SUELOS = {
@@ -333,6 +334,25 @@ def sombras_contacto(h: int, w: int, geo: dict, fuerza: float) -> np.ndarray:
 # Encuadre
 # --------------------------------------------------------------------------- #
 
+CARRUSEL_AUTO = -1
+
+
+def partes_carrusel(alfa: np.ndarray, op: OpcionesEstudio) -> int:
+    """Número de partes del carrusel (0 = sin carrusel). En automático se elige el
+    N de 2 a 4 cuyo lienzo N:1 deja menos espacio vacío alrededor de las minis."""
+    if op.carrusel in (2, 3, 4):
+        return op.carrusel
+    if op.carrusel != CARRUSEL_AUTO:
+        return 0
+    from .carrusel import partes_recomendadas
+
+    x0, y0, x1, y1 = caja_sujeto(alfa, umbral=0.5)
+    alto = y1 - y0
+    if op.reflejo > 0:
+        alto += 2 * op.reflejo_caida * alto   # el lienzo reserva sitio para el reflejo
+    return partes_recomendadas(x1 - x0, alto, op.margen)
+
+
 def calcular_lienzo(alfa: np.ndarray, op: OpcionesEstudio,
                     dentro_de_la_foto: bool = False) -> tuple[int, int, int, int]:
     """Devuelve (ox, oy, W, H): desplazamiento del original dentro del nuevo lienzo
@@ -342,7 +362,7 @@ def calcular_lienzo(alfa: np.ndarray, op: OpcionesEstudio,
     foto: así el suelo no termina en seco contra el negro.
     """
     h, w = alfa.shape
-    n = op.carrusel if op.carrusel in (2, 3, 4) else 0
+    n = partes_carrusel(alfa, op)
     if not op.reencuadrar and not n:
         return 0, 0, w, h
     # Caja de la parte sólida del sujeto: las penumbras débiles del contorno (p. ej.

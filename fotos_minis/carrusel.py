@@ -49,3 +49,10 @@ def partes_recomendadas(ancho: float, alto: float, margen: float = 0.12) -> int:
         return (w * h) / (n * lado * lado)
 
     return max(PARTES, key=ocupacion)
+
+
+def partes_de_imagen(imagen: Image.Image) -> int:
+    """N de una imagen ya compuesta en modo carrusel (ancho = N × alto), o 0."""
+    w, h = imagen.size
+    n = w // h if h else 0
+    return n if n in PARTES and w == n * h else 0

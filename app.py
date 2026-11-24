@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 import os
 import shutil
 from datetime import datetime
@@ -21,7 +22,8 @@ from fotos_minis.composicion import (PROPORCIONES, SUELOS, OpcionesEstudio, _peg
                                      descontaminar as limpiar_primer_plano)
 from fotos_minis import perfiles, preferencias
 from fotos_minis.perfiles import CAMPOS_ESTUDIO, FABRICA
-from fotos_minis.carrusel import borrar_partes, dividir, nombre_parte, partes_recomendadas
+from fotos_minis.carrusel import borrar_partes, dividir, nombre_parte, partes_de_imagen
+from fotos_minis.composicion import CARRUSEL_AUTO, partes_carrusel
 from fotos_minis.composicion import caja_sujeto
 from fotos_minis.proceso import cargar, guardar, procesar
 from fotos_minis.segmentacion import MODELO_POR_DEFECTO, MODELOS, mascara_bruta, refinar_mascara
@@ -151,7 +153,7 @@ def procesar_una(ruta, modelo, huecos, *ajustes, request: gr.Request = None, pro
     # cuadradas. Las partes de pruebas anteriores de esta foto se eliminan siempre.
     borrar_partes(carpeta_fotos(), base)
     galeria = None
-    n = op.carrusel if op.carrusel in (2, 3, 4) else 0
+    n = partes_carrusel(alfa, op)
     if n:
         a_l = np.zeros((H, W), np.float32)
         _pegar(a_l, alfa, ox, oy)
@@ -170,10 +172,13 @@ def procesar_una(ruta, modelo, huecos, *ajustes, request: gr.Request = None, pro
                 z.write(temporal / nombre, nombre)
                 galeria.append((str(temporal / nombre), f"{i} de {n}"))
         aviso += f" y las {n} partes del carrusel (`{nombre_parte(base, 1, n)}`…)"
-        bx0, by0, bx1, by1 = caja_sujeto(alfa, umbral=0.5)
-        mejor = partes_recomendadas(bx1 - bx0, by1 - by0, op.margen)
-        if mejor != n:
-            aviso += f". Para esta foto, con **{mejor} partes** las minis ocuparían más espacio."
+        if op.carrusel == CARRUSEL_AUTO:
+            aviso += f". Automático: **{n} partes** es lo que mejor aprovecha esta foto."
+        else:
+            mejor = partes_carrusel(alfa, replace(op, carrusel=CARRUSEL_AUTO))
+            if mejor != n:
+                aviso += (f". Para esta foto, con **{mejor} partes** las minis ocuparían más espacio "
+                          "(o elige «Auto»).")
 
     mascara = Image.fromarray(np.round(alfa * 255).astype(np.uint8))
     _ultimas_firmas[sesion] = firma
@@ -254,9 +259,10 @@ def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
             nombre = f"{Path(f).stem}_estudio.png"
             guardar(r.estudio, carpeta / nombre)
             z.write(carpeta / nombre, nombre)
-            if op.carrusel in (2, 3, 4):
-                for i, parte in enumerate(dividir(r.estudio, op.carrusel), 1):
-                    nombre = nombre_parte(Path(f).stem, i, op.carrusel)
+            n = partes_de_imagen(r.estudio) if op.carrusel else 0
+            if n:
+                for i, parte in enumerate(dividir(r.estudio, n), 1):
+                    nombre = nombre_parte(Path(f).stem, i, n)
                     guardar(parte, carpeta / nombre)
                     z.write(carpeta / nombre, nombre)
     guardado = _guardar_copia(zip_path, f"fotos_estudio_{datetime.now():%Y-%m-%d_%H-%M-%S}.zip")
@@ -424,10 +430,12 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                             margen = gr.Slider(0, 0.5, 0.12, step=0.01, label="Margen")
                             proporcion = gr.Dropdown(["original", *PROPORCIONES], value="original",
                                                      label="Proporción", info="Sin carrusel")
-                            carrusel = gr.Radio([("No", 0), ("2 partes", 2), ("3 partes", 3), ("4 partes", 4)],
+                            carrusel = gr.Radio([("No", 0), ("Auto", CARRUSEL_AUTO), ("2 partes", 2), ("3 partes", 3),
+                                                 ("4 partes", 4)],
                                                 value=0, label="Carrusel de Instagram",
                                                 info="Imagen N:1 dividida en N cuadrados que, al deslizar, "
-                                                     "se ven como una sola imagen continua")
+                                                     "se ven como una sola imagen continua. «Auto» elige el número de "
+                                                     "partes con el que las minis ocupan más área")
 
                 # ---------------- Visor ----------------
                 with gr.Column(scale=3, min_width=480):

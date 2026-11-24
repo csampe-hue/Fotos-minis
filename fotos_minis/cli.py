@@ -59,8 +59,9 @@ def main(argv=None) -> None:
     p.add_argument("--negro", type=int, help="nivel del negro de fondo (0-40)")
     p.add_argument("--margen", type=float)
     p.add_argument("--proporcion", choices=["original", *PROPORCIONES])
-    p.add_argument("--carrusel", type=int, choices=[2, 3, 4],
-                   help="divide en N cuadrados contiguos para un carrusel de Instagram")
+    p.add_argument("--carrusel", choices=["auto", "2", "3", "4"],
+                   help="divide en N cuadrados contiguos para un carrusel de Instagram "
+                        "(auto: el N con el que las minis ocupan más área)")
     p.add_argument("--sin-reencuadre", action="store_true", help="mantiene el tamaño original")
     p.add_argument("--rellenar-huecos", type=int, metavar="PX",
                    help="rellena huecos interiores de la máscara menores de PX píxeles")
@@ -83,6 +84,8 @@ def main(argv=None) -> None:
         valores = perfiles.obtener(nombre)
     except KeyError as e:
         sys.exit(f"{e.args[0]}. Usa --perfiles para ver los disponibles.")
+    if a.carrusel is not None:
+        a.carrusel = -1 if a.carrusel == "auto" else int(a.carrusel)
     for opcion, campo in OPCIONES.items():
         if getattr(a, opcion) is not None:
             valores[campo] = getattr(a, opcion)
@@ -104,11 +107,13 @@ def main(argv=None) -> None:
         r = procesar(f, op, modelo=modelo, rellenar_huecos_px=huecos)
         destino = a.salida / f"{f.stem}_estudio.jpg"
         guardar(r.estudio, destino, quality=a.calidad, subsampling=0)
-        if op.carrusel in (2, 3, 4):
-            from .carrusel import borrar_partes, dividir, nombre_parte
+        from .carrusel import borrar_partes, dividir, nombre_parte, partes_de_imagen
+        n = partes_de_imagen(r.estudio) if op.carrusel else 0
+        if n:
             borrar_partes(a.salida, f.stem)
-            for i, parte in enumerate(dividir(r.estudio, op.carrusel), 1):
-                guardar(parte, a.salida / nombre_parte(f.stem, i, op.carrusel, ".jpg"),
+            print(f"    carrusel de {n} partes")
+            for i, parte in enumerate(dividir(r.estudio, n), 1):
+                guardar(parte, a.salida / nombre_parte(f.stem, i, n, ".jpg"),
                         quality=a.calidad, subsampling=0)
         if a.recorte:
             guardar(r.recorte, a.salida / f"{f.stem}_recorte.png")

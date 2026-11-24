@@ -85,3 +85,41 @@ def test_partes_recomendadas():
     assert partes_recomendadas(300, 100, 0) == 3
     assert partes_recomendadas(500, 100, 0) == 4
     assert partes_recomendadas(100, 200, 0) == 2      # figura alta: lo menos malo son 2
+
+
+@pytest.mark.parametrize("ancho_grupo, esperado", [(130, 2), (330, 3), (390, 4)])
+def test_auto_elige_las_partes_que_mas_area_ocupan(ancho_grupo, esperado):
+    from fotos_minis.composicion import CARRUSEL_AUTO, partes_carrusel
+    h, w = 300, 500
+    alfa = np.zeros((h, w), np.float32)
+    x0 = (w - ancho_grupo) // 2
+    alfa[120:220, x0:x0 + ancho_grupo] = 1                    # grupo de 100 px de alto
+    op = OpcionesEstudio(carrusel=CARRUSEL_AUTO, margen=0.02)
+    assert partes_carrusel(alfa, op) == esperado
+    img = np.full((h, w, 3), 120, np.uint8)
+    out = componer(img, alfa, op)
+    assert out.shape[1] == esperado * out.shape[0]
+    # Ninguna otra opción deja a las minis más área del lienzo.
+    def ocupacion(n):
+        _, _, W, H = calcular_lienzo(alfa, OpcionesEstudio(carrusel=n, margen=0.02))
+        return alfa.sum() / (W * H)
+    assert ocupacion(esperado) == max(ocupacion(n) for n in (2, 3, 4))
+
+
+def test_auto_en_la_app_guarda_las_partes_elegidas(tmp_path, monkeypatch):
+    pytest.importorskip("gradio")
+    monkeypatch.setenv("FOTOS_MINIS_SALIDA", str(tmp_path / "fotos"))
+    monkeypatch.setenv("FOTOS_MINIS_PERFILES", str(tmp_path / "perfiles.json"))
+    import app
+    from fotos_minis import perfiles
+    app._ultimas_firmas.clear()
+    img, alfa = _grupo()                                      # tres minis en fila: 250×110
+    ruta = tmp_path / "grupo.png"
+    Image.fromarray(img).save(ruta)
+    app._cache_mascaras[app._clave(img, "combinado", 0)] = (alfa, img.astype(np.float32) / 255)
+    v = perfiles.valores_fabrica() | {"carrusel": -1}
+    r = app.procesar_una(str(ruta), "combinado", 0, *[v[k] for k in perfiles.CAMPOS_ESTUDIO],
+                         progress=lambda *a, **k: None)
+    partes = sorted(f.name for f in (tmp_path / "fotos").iterdir() if "carrusel" in f.name)
+    assert partes == ["grupo_carrusel_1de2.png", "grupo_carrusel_2de2.png"]
+    assert "Automático: **2 partes**" in r[3]
