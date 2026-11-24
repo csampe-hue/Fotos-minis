@@ -148,7 +148,7 @@ En línea de comandos: `--suelo estudio|original|oscuro|arido` y `--suelo-ajuste
 
 ## Carrusel de Instagram (pestaña «Encuadre»)
 
-Elige **Auto** o **2, 3 o 4 partes**. En Auto, para cada foto se usa el número de partes
+Elige **Auto** o de **2 a 6 partes**. En Auto, para cada foto se usa el número de partes
 con el que las minis ocupan más área (en un lote, cada foto el suyo). Después: la imagen se encuadra en proporción N:1 (N cuadrados seguidos),
 lo más ajustada posible a las minis con el margen indicado y sin reescalarlas, y se corta en
 N imágenes 1:1. Publicadas juntas como carrusel, al deslizar se ven como una sola imagen

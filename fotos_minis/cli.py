@@ -59,7 +59,7 @@ def main(argv=None) -> None:
     p.add_argument("--negro", type=int, help="nivel del negro de fondo (0-40)")
     p.add_argument("--margen", type=float)
     p.add_argument("--proporcion", choices=["original", *PROPORCIONES])
-    p.add_argument("--carrusel", choices=["auto", "2", "3", "4"],
+    p.add_argument("--carrusel", choices=["auto", "2", "3", "4", "5", "6"],
                    help="divide en N cuadrados contiguos para un carrusel de Instagram "
                         "(auto: el N con el que las minis ocupan más área)")
     p.add_argument("--sin-reencuadre", action="store_true", help="mantiene el tamaño original")

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PIL import Image
 
-PARTES = (2, 3, 4)
+PARTES = (2, 3, 4, 5, 6)  # Instagram admite hasta 20; más de 6 deja cada parte muy estrecha
 
 
 def dividir(imagen: Image.Image, n: int) -> list[Image.Image]:
@@ -41,7 +41,7 @@ def borrar_partes(carpeta: Path, base: str) -> None:
 def partes_recomendadas(ancho: float, alto: float, margen: float = 0.12) -> int:
     """Número de partes cuya proporción N:1 deja menos espacio vacío alrededor de un
     sujeto de ancho×alto (con el margen indicado)."""
-    m = margen * max(ancho, alto)
+    m = margen * alto          # mismo criterio que el lienzo en modo carrusel
     w, h = ancho + 2 * m, alto + 2 * m
 
     def ocupacion(n: int) -> float:

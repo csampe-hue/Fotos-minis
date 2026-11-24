@@ -37,7 +37,7 @@ def test_las_minis_caben_enteras_y_ocupan_lo_maximo(n):
     x0, y0, x1, y1 = caja_sujeto(alfa, 0.5)
     bw, bh = x1 - x0, y1 - y0
     assert ox + x0 >= 0 and oy + y0 >= 0 and ox + x1 <= W and oy + y1 <= H   # enteras
-    m = int(0.05 * max(bw, bh))
+    m = int(0.05 * bh)                     # en carrusel el margen se mide sobre el alto
     # El lienzo es el mínimo N:1 que contiene al sujeto con su margen: lo toca en un eje.
     assert H == bh + 2 * m or W == bw + 2 * m or W == n * (bh + 2 * m)
 
@@ -83,7 +83,8 @@ def test_partes_recomendadas():
     from fotos_minis.carrusel import partes_recomendadas
     assert partes_recomendadas(200, 100, 0) == 2
     assert partes_recomendadas(300, 100, 0) == 3
-    assert partes_recomendadas(500, 100, 0) == 4
+    assert partes_recomendadas(400, 100, 0) == 4
+    assert partes_recomendadas(500, 100, 0) == 5
     assert partes_recomendadas(100, 200, 0) == 2      # figura alta: lo menos malo son 2
 
 
@@ -123,3 +124,21 @@ def test_auto_en_la_app_guarda_las_partes_elegidas(tmp_path, monkeypatch):
     partes = sorted(f.name for f in (tmp_path / "fotos").iterdir() if "carrusel" in f.name)
     assert partes == ["grupo_carrusel_1de2.png", "grupo_carrusel_2de2.png"]
     assert "Automático: **2 partes**" in r[3]
+
+
+@pytest.mark.parametrize("ancho_grupo, esperado", [(510, 5), (640, 6)])
+def test_auto_llega_hasta_6_partes(ancho_grupo, esperado):
+    from fotos_minis.composicion import CARRUSEL_AUTO, partes_carrusel
+    alfa = np.zeros((300, 900), np.float32)
+    x0 = (900 - ancho_grupo) // 2
+    alfa[120:220, x0:x0 + ancho_grupo] = 1                    # fila larga de 100 px de alto
+    op = OpcionesEstudio(carrusel=CARRUSEL_AUTO, margen=0.02)
+    assert partes_carrusel(alfa, op) == esperado
+    out = componer(np.full((300, 900, 3), 120, np.uint8), alfa, op)
+    partes = dividir(Image.fromarray(out), esperado)
+    assert len(partes) == esperado and all(p.width == p.height for p in partes)
+
+
+def test_una_fila_muy_larga_se_queda_en_6():
+    from fotos_minis.carrusel import partes_recomendadas
+    assert partes_recomendadas(1500, 100, 0) == 6

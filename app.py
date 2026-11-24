@@ -431,7 +431,7 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                             proporcion = gr.Dropdown(["original", *PROPORCIONES], value="original",
                                                      label="Proporción", info="Sin carrusel")
                             carrusel = gr.Radio([("No", 0), ("Auto", CARRUSEL_AUTO), ("2 partes", 2), ("3 partes", 3),
-                                                 ("4 partes", 4)],
+                                                 ("4 partes", 4), ("5 partes", 5), ("6 partes", 6)],
                                                 value=0, label="Carrusel de Instagram",
                                                 info="Imagen N:1 dividida en N cuadrados que, al deslizar, "
                                                      "se ven como una sola imagen continua. «Auto» elige el número de "

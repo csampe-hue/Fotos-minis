@@ -44,7 +44,7 @@ class OpcionesEstudio:
     reencuadrar: bool = True
     margen: float = 0.12            # margen alrededor del sujeto (fracción del lado mayor)
     proporcion: str = "original"    # "original", "1:1", "4:5", "3:2", "2:3", "16:9"
-    carrusel: int = 0               # 2, 3 o 4: imagen N:1 para dividir en N cuadrados (Instagram);
+    carrusel: int = 0               # 2 a 6: imagen N:1 para dividir en N cuadrados (Instagram);
                                     # -1 = automático (el N con el que las minis ocupan más área)
 
 
@@ -339,8 +339,10 @@ CARRUSEL_AUTO = -1
 
 def partes_carrusel(alfa: np.ndarray, op: OpcionesEstudio) -> int:
     """Número de partes del carrusel (0 = sin carrusel). En automático se elige el
-    N de 2 a 4 cuyo lienzo N:1 deja menos espacio vacío alrededor de las minis."""
-    if op.carrusel in (2, 3, 4):
+    N de 2 a 6 cuyo lienzo N:1 deja menos espacio vacío alrededor de las minis."""
+    from .carrusel import PARTES
+
+    if op.carrusel in PARTES:
         return op.carrusel
     if op.carrusel != CARRUSEL_AUTO:
         return 0
@@ -370,7 +372,10 @@ def calcular_lienzo(alfa: np.ndarray, op: OpcionesEstudio,
     x0, y0, x1, y1 = caja_sujeto(alfa, umbral=0.5)
     bw, bh = x1 - x0, y1 - y0
     extra_inf = op.reflejo_caida * bh if op.reflejo > 0 else 0
-    m = int(op.margen * max(bw, bh))
+    # En carrusel el margen se mide sobre el alto del grupo: con una fila larga de minis,
+    # medirlo sobre el ancho daría márgenes enormes arriba y abajo y las minis quedarían
+    # pequeñas en cada parte.
+    m = int(op.margen * (bh if n else max(bw, bh)))
     # Lienzo simétrico: el sujeto queda centrado en horizontal y en vertical. Si hay
     # reflejo, el margen inferior (y por simetría el superior) crece para que quepa.
     W, H = bw + 2 * m, int(bh + 2 * (m + extra_inf))

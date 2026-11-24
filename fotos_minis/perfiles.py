@@ -76,7 +76,7 @@ def _sanear(valores: dict) -> dict:
     if base["suelo"] not in SUELOS:
         base["suelo"] = "estudio"
     try:
-        base["carrusel"] = int(base["carrusel"]) if int(base["carrusel"]) in (-1, 2, 3, 4) else 0
+        base["carrusel"] = int(base["carrusel"]) if int(base["carrusel"]) in (-1, 2, 3, 4, 5, 6) else 0
     except (TypeError, ValueError):
         base["carrusel"] = 0
     return base
