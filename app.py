@@ -479,6 +479,10 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                                                        info="Si hay varias figuras, además de la foto de grupo "
                                                             "se recorta una por figura con la misma proporción "
                                                             "(1:1 en carrusel)")
+                            superres = gr.Radio([("No", 0), ("×2", 2), ("×4", 4)], value=0,
+                                                label="Super-resolución (IA) de las fotos individuales",
+                                                info="Más nitidez en los recortes pequeños. Tarda unos "
+                                                     "segundos por figura; máximo 4096 px")
 
                 # ---------------- Visor ----------------
                 with gr.Column(scale=3, min_width=480):
@@ -516,7 +520,7 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
 
     ajustes = [halo, vineteado, sombra, reflejo, caida, oscurecer, dominante, negro, reencuadrar,
                margen, proporcion, descontaminar, suelo, suelo_ajuste, horizonte, h_distancia, h_desenfoque,
-               h_suelo, h_altura, carrusel, individuales]
+               h_suelo, h_altura, carrusel, individuales, superres]
     entradas = [entrada, modelo, huecos, *ajustes]
     salidas = [comparador, mascara, descarga, guardado, galeria, galeria_ind]
     boton.click(procesar_desde_ui, entradas, salidas)

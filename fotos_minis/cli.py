@@ -64,6 +64,8 @@ def main(argv=None) -> None:
                         "(auto: el N con el que las minis ocupan más área)")
     p.add_argument("--individuales", action="store_true",
                    help="si hay varias figuras, guarda además una foto recortada de cada una")
+    p.add_argument("--superres", type=int, choices=[2, 4],
+                   help="super-resolución (IA) ×2 o ×4 de las fotos individuales")
     p.add_argument("--sin-reencuadre", action="store_true", help="mantiene el tamaño original")
     p.add_argument("--rellenar-huecos", type=int, metavar="PX",
                    help="rellena huecos interiores de la máscara menores de PX píxeles")
@@ -93,6 +95,8 @@ def main(argv=None) -> None:
             valores[campo] = getattr(a, opcion)
     if a.individuales:
         valores["individuales"] = True
+    if a.superres:
+        valores["superres"] = a.superres
     if a.sin_reencuadre:
         valores["reencuadrar"] = False
     op, modelo, huecos = perfiles.a_opciones(valores)

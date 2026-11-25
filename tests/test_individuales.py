@@ -135,3 +135,41 @@ def test_app_guarda_grupo_e_individuales(tmp_path, monkeypatch):
         assert im.width == im.height                       # carrusel -> 1:1
     procesar(individuales=False)                           # otra prueba sin individuales
     assert not any("figura" in f for f in ficheros())
+
+
+def test_torso_ancho_no_cuenta_como_peana():
+    """Figura corriendo: torso + pierna en horizontal parecen una peana muy por encima
+    de la real, casi en su vertical y unida a ella -> se descarta."""
+    from fotos_minis.individuales import _descartar_falsas
+    alfa = np.zeros((400, 400), np.float32)
+    alfa[100:330, 180:220] = 1                                   # una sola pieza
+    reales = [(200, 320, 60, 16)]
+    falsa = (205, 200, 60, 16)                                   # 7,5 alturas de peana más arriba
+    tapada = (250, 296, 60, 16)                                  # detrás: 1,5 alturas más arriba
+    assert _descartar_falsas(reales + [falsa, tapada], alfa) == reales + [tapada]
+
+
+def test_superresolucion_de_las_individuales():
+    from fotos_minis.superres import disponible, factor_efectivo
+    if not disponible():
+        pytest.skip("modelo de super-resolución no incluido")
+    img, alfa = _grupo([(110, 300), (530, 300)], w=640)
+    base = OpcionesEstudio(proporcion="1:1", margen=0.05)
+    out = componer(img, alfa, base)
+    normal = individuales(out, alfa, base, img)[0]
+    x2 = individuales(out, alfa, OpcionesEstudio(proporcion="1:1", margen=0.05, superres=2), img)[0]
+    for (n, _), (s, _) in zip(normal, x2):
+        assert s.shape[0] == 2 * n.shape[0] and s.shape[1] == 2 * n.shape[1]
+    assert factor_efectivo((3000, 3000), 4) == 4096 / 3000       # tope de 4096 px
+
+
+def test_superres_amplia_sin_costuras():
+    from fotos_minis.superres import TESELA, ampliar, disponible
+    if not disponible():
+        pytest.skip("modelo de super-resolución no incluido")
+    yy, xx = np.mgrid[0:300, 0:300]
+    img = np.dstack([(xx * 0.8).astype(np.uint8), (yy * 0.8).astype(np.uint8), np.full((300, 300), 90, np.uint8)])
+    r = ampliar(img, 4).astype(float)
+    assert r.shape == (1200, 1200, 3)
+    d = np.abs(np.diff(r.mean(axis=2), axis=1)).mean(axis=0)
+    assert d[4 * TESELA - 1] < 3 * np.median(d) + 1           # sin escalón en la costura

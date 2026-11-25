@@ -45,6 +45,7 @@ class OpcionesEstudio:
     margen: float = 0.12            # margen alrededor del sujeto (fracción del lado mayor)
     proporcion: str = "original"    # "original", "1:1", "4:5", "3:2", "2:3", "16:9"
     individuales: bool = False      # además, una foto recortada por figura (si hay varias)
+    superres: int = 0               # super-resolución (IA) de las fotos individuales: 0, 2 o 4
     carrusel: int = 0               # 2 a 6: imagen N:1 para dividir en N cuadrados (Instagram);
                                     # -1 = automático (el N con el que las minis ocupan más área)
 

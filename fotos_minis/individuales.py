@@ -115,7 +115,27 @@ def localizar_peanas(alfa: np.ndarray) -> list[tuple[float, float, float, float]
         borrar = np.zeros_like(restante)
         cv2.ellipse(borrar, (int(x), int(y)), (max(int(a * 1.05), 1), max(int(b * 1.05), 1)), 0, 0, 360, 1.0, -1)
         restante *= 1 - borrar
-    return elegidas
+    return _descartar_falsas(elegidas, alfa)
+
+
+def _descartar_falsas(bases, alfa):
+    """Quita «peanas» que en realidad son el cuerpo de una figura (p. ej. torso y una
+    pierna levantada en horizontal forman una forma ancha y plana). Una peana real
+    tapada por otra queda como mucho a ~2 alturas de peana por encima de ella; si hay
+    otra peana casi en la misma vertical, unida a ella y mucho más abajo, es falsa."""
+    etiquetas = cv2.connectedComponents((alfa > 0.5).astype(np.uint8), connectivity=8)[1]
+    h, w = alfa.shape
+
+    def pieza(x, y):
+        return etiquetas[int(np.clip(y, 0, h - 1)), int(np.clip(x, 0, w - 1))]
+
+    buenas = []
+    for x, y, a, b in bases:
+        falsa = any(y2 - y > 2.8 * b and abs(x2 - x) < 0.5 * a and pieza(x, y) and pieza(x, y) == pieza(x2, y2)
+                    for x2, y2, _, _ in bases)
+        if not falsa:
+            buenas.append((x, y, a, b))
+    return buenas
 
 
 def mascaras_figuras(alfa: np.ndarray, imagen: np.ndarray | None = None) -> list[np.ndarray]:
@@ -296,7 +316,7 @@ def individuales(salida: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio, imag
                 otras = np.zeros((H, W), bool)
                 _pegar(otras, total & ~propia, ox, oy)
                 if otras[vy0:vy1, vx0:vx1].sum() <= 0.0005 * (vx1 - vx0) * (vy1 - vy0):
-                    res.append((salida[vy0:vy1, vx0:vx1].copy(), "recorte"))
+                    res.append((_mejorar(salida[vy0:vy1, vx0:vx1].copy(), op), "recorte"))
                     continue
         # Fondo nuevo: la figura sola. Con el suelo real de la foto, las otras figuras
         # se borran de él (inpainting) para que no reaparezcan.
@@ -304,8 +324,16 @@ def individuales(salida: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio, imag
         if op.suelo == "original":
             otras_orig = cv2.dilate((total & ~propia).astype(np.uint8), np.ones((9, 9), np.uint8))
             img_i = cv2.inpaint(np.ascontiguousarray(imagen[..., :3]), otras_orig, 7, cv2.INPAINT_TELEA)
-        res.append((componer(img_i, m, op_ind, primer_plano), "nuevo fondo"))
+        res.append((_mejorar(componer(img_i, m, op_ind, primer_plano), op), "nuevo fondo"))
     return res, tapadas
+
+
+def _mejorar(img: np.ndarray, op: OpcionesEstudio) -> np.ndarray:
+    """Super-resolución opcional (Real-ESRGAN) de una foto individual."""
+    if op.superres in (2, 4):
+        from .superres import ampliar
+        return ampliar(img, op.superres)
+    return img
 
 
 def recortes(salida: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio,

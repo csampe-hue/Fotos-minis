@@ -172,6 +172,10 @@ de «Proporción», o 1:1 si el carrusel está activo).
   **recorta** de ella. Si no, esa figura se **vuelve a componer sola con un fondo nuevo**
   (mismo fondo, suelo y luz; se reutiliza su máscara, no se segmenta otra vez).
 - Las figuras casi ocultas tras otras no pueden mostrarse enteras: se omiten y se avisa.
+- **Super-resolución (IA)** opcional, ×2 o ×4 (máximo 4096 px): amplía las fotos individuales
+  con Real-ESRGAN para que los recortes pequeños no queden borrosos. Tarda unos segundos por
+  figura en CPU. Ojo: al ser IA, reinterpreta los detalles más finos (la figura ya no es
+  píxel a píxel la original); por eso es opcional. Terminal: `--superres 2`.
 - Con una sola figura no se genera nada. Se ven en la pestaña **Individuales** (indicando si
   son recorte o fondo nuevo), van en el ZIP y en otra prueba se sustituyen. Terminal:
   `--individuales`.
