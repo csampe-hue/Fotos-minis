@@ -162,13 +162,19 @@ cuántas partes aprovechan mejor el espacio en esa foto. Línea de comandos: `--
 ## Fotos individuales de cada figura (pestaña «Encuadre»)
 
 Marca **Fotos individuales de cada figura**: si en la foto hay varias minis, además de la
-foto de grupo se guarda una por figura (`<nombre>_figura1.png`, … de izquierda a derecha).
-Son **recortes de la imagen final**, sin volver a procesar: se localiza cada peana (aunque
-se toquen o se solapen) y se encuadra esa figura con la proporción objetivo (la de
-«Proporción», o 1:1 si el carrusel está activo). En grupos apretados pueden asomar los
-vecinos en los bordes. Con una sola figura no se genera nada. Se ven en la pestaña
-**Individuales** del visor, van en el ZIP de descarga y en otra prueba con la misma foto se
-sustituyen. Línea de comandos: `--individuales`.
+foto de grupo se guarda una por figura (`<nombre>_figura1.png`, … de izquierda a derecha),
+**centrada y entera** (brazos levantados y armas incluidos) con la proporción objetivo (la
+de «Proporción», o 1:1 si el carrusel está activo).
+
+- Cada figura es todo lo que está unido a su peana; si varias se solapan, se separan por la
+  divisoria entre ellas (la de delante tiene preferencia).
+- Si el encuadre centrado cabe en la foto de grupo y no asoma ninguna otra figura, se
+  **recorta** de ella. Si no, esa figura se **vuelve a componer sola con un fondo nuevo**
+  (mismo fondo, suelo y luz; se reutiliza su máscara, no se segmenta otra vez).
+- Las figuras casi ocultas tras otras no pueden mostrarse enteras: se omiten y se avisa.
+- Con una sola figura no se genera nada. Se ven en la pestaña **Individuales** (indicando si
+  son recorte o fondo nuevo), van en el ZIP y en otra prueba se sustituyen. Terminal:
+  `--individuales`.
 
 ## Perfiles de ajustes
 

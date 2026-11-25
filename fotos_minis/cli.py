@@ -119,14 +119,17 @@ def main(argv=None) -> None:
             for i, parte in enumerate(dividir(r.estudio, n), 1):
                 guardar(parte, a.salida / nombre_parte(f.stem, i, n, ".jpg"),
                         quality=a.calidad, subsampling=0)
-        from .individuales import borrar_individuales, nombre_individual, recortes
+        from .individuales import borrar_individuales, individuales, nombre_individual
+        from .proceso import cargar
         borrar_individuales(a.salida, f.stem)
         if op.individuales:
             import numpy as np
             from PIL import Image
-            trozos = recortes(np.asarray(r.estudio), np.asarray(r.mascara, np.float32) / 255.0, op)
+            lista, tapadas = individuales(np.asarray(r.estudio), np.asarray(r.mascara, np.float32) / 255.0,
+                                          op, np.asarray(cargar(f)))
+            trozos = [im for im, _ in lista]
             if trozos:
-                print(f"    {len(trozos)} figuras: fotos individuales")
+                print(f"    {len(trozos)} fotos individuales" + (f" ({tapadas} figuras casi ocultas omitidas)" if tapadas else ""))
             for i, trozo in enumerate(trozos, 1):
                 im = Image.fromarray(trozo)
                 im.info.update(r.estudio.info)

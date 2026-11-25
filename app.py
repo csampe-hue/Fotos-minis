@@ -24,7 +24,7 @@ from fotos_minis import perfiles, preferencias
 from fotos_minis.perfiles import CAMPOS_ESTUDIO, FABRICA
 from fotos_minis.carrusel import borrar_partes, dividir, nombre_parte, partes_de_imagen
 from fotos_minis.composicion import CARRUSEL_AUTO, partes_carrusel
-from fotos_minis.individuales import borrar_individuales, nombre_individual, recortes
+from fotos_minis.individuales import borrar_individuales, individuales as fotos_individuales, nombre_individual
 from fotos_minis.composicion import caja_sujeto
 from fotos_minis.proceso import cargar, guardar, procesar
 from fotos_minis.segmentacion import MODELO_POR_DEFECTO, MODELOS, mascara_bruta, refinar_mascara
@@ -181,11 +181,13 @@ def procesar_una(ruta, modelo, huecos, *ajustes, request: gr.Request = None, pro
                 aviso += (f". Para esta foto, con **{mejor} partes** las minis ocuparían más espacio "
                           "(o elige «Auto»).")
 
-    # Fotos individuales: recortes de la imagen final, uno por figura (si hay varias).
+    # Fotos individuales: una por figura (si hay varias), centrada y entera; recortada
+    # de la foto de grupo o, si no cabe o asoman otras figuras, con fondo nuevo.
     borrar_individuales(carpeta_fotos(), base)
     individuales = None
     if op.individuales:
-        trozos = recortes(out, alfa, op)
+        lista, tapadas = fotos_individuales(out, alfa, op, arr, primer_plano)
+        trozos = [im for im, _ in lista]
         if trozos:
             individuales = []
             if descarga == destino:                       # aún no hay ZIP (sin carrusel)
@@ -200,8 +202,12 @@ def procesar_una(ruta, modelo, huecos, *ajustes, request: gr.Request = None, pro
                     guardar(im, temporal / nombre)
                     _guardar_copia(temporal / nombre, nombre)
                     z.write(temporal / nombre, nombre)
-                    individuales.append((str(temporal / nombre), f"Figura {i}"))
+                    individuales.append((str(temporal / nombre), f"Figura {i} · {lista[i - 1][1]}"))
             aviso += ("" if aviso.endswith(".") else ".") + f" Además, {len(trozos)} fotos individuales (`{nombre_individual(base, 1)}`…)"
+            if tapadas:
+                aviso += (f"; {tapadas} figura{'s' if tapadas > 1 else ''} casi oculta{'s' if tapadas > 1 else ''} "
+                          "tras otras no se puede{} mostrar entera{} y se omite{}.").format(
+                              *(("n", "s", "n") if tapadas > 1 else ("", "", "")))
         else:
             aviso += ("" if aviso.endswith(".") else ".") + " Sólo se detecta una figura: no se generan fotos individuales."
 
@@ -293,7 +299,8 @@ def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
                     z.write(carpeta / nombre, nombre)
             if op.individuales:
                 alfa_f = np.asarray(r.mascara, np.float32) / 255.0
-                for i, trozo in enumerate(recortes(np.asarray(r.estudio), alfa_f, op), 1):
+                lista, _ = fotos_individuales(np.asarray(r.estudio), alfa_f, op, np.asarray(cargar(f)))
+                for i, (trozo, _) in enumerate(lista, 1):
                     nombre = nombre_individual(Path(f).stem, i)
                     guardar(Image.fromarray(trozo), carpeta / nombre)
                     z.write(carpeta / nombre, nombre)

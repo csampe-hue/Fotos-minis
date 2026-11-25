@@ -13,8 +13,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .composicion import (PROPORCIONES, OpcionesEstudio, _pegar, calcular_lienzo, mascara_peanas,
-                          partes_carrusel, peanas)
+from .composicion import (PROPORCIONES, OpcionesEstudio, _pegar, caja_sujeto, calcular_lienzo,
+                          mascara_peanas, partes_carrusel, peanas)
 
 
 @dataclass
@@ -118,96 +118,202 @@ def localizar_peanas(alfa: np.ndarray) -> list[tuple[float, float, float, float]
     return elegidas
 
 
-def figuras(alfa: np.ndarray) -> list[Figura]:
-    """Figuras (una por peana) de izquierda a derecha, con la caja de cada una."""
-    sujeto = alfa > 0.5
+def mascaras_figuras(alfa: np.ndarray, imagen: np.ndarray | None = None) -> list[np.ndarray]:
+    """Máscara alfa de cada figura (de izquierda a derecha), o [] si hay menos de dos.
+
+    Cada figura es todo lo que está unido a su peana en la silueta (brazos levantados,
+    armas...). Si varias figuras forman una sola pieza porque se solapan, se separan
+    con una divisoria (watershed) sobre la foto, sembrada en cada peana.
+    """
+    bases = localizar_peanas(alfa)
+    if len(bases) < 2:
+        return []
+    sujeto = (alfa > 0.5).astype(np.uint8)
     h, w = sujeto.shape
+    n, etiquetas, stats, _ = cv2.connectedComponentsWithStats(sujeto, connectivity=8)
+    propias = np.zeros((h, w), np.int32)          # 1..len(bases): figura de cada píxel
+
+    def comp_de(cx, cy):
+        x, y = int(np.clip(cx, 0, w - 1)), int(np.clip(cy, 0, h - 1))
+        if etiquetas[y, x]:
+            return etiquetas[y, x]
+        ventana = etiquetas[max(y - 5, 0):y + 6, max(x - 5, 0):x + 6]
+        valores = ventana[ventana > 0]
+        return int(np.bincount(valores).argmax()) if len(valores) else 0
+
+    por_comp: dict[int, list[int]] = {}
+    for i, (cx, cy, a, b) in enumerate(bases):
+        por_comp.setdefault(comp_de(cx, cy), []).append(i)
+    for k, indices in por_comp.items():
+        if k == 0:
+            continue
+        zona = etiquetas == k
+        if len(indices) == 1:
+            propias[zona] = indices[0] + 1
+            continue
+        marcas = np.zeros((h, w), np.int32)
+        marcas[~zona] = len(bases) + 1                         # fuera de la pieza
+        # Semillas: la peana y la «columna» del cuerpo encima de ella. Se dibujan de
+        # atrás adelante: donde se solapan manda la figura delantera (la que tapa).
+        for i in sorted(indices, key=lambda j: bases[j][1]):
+            cx, cy, a, b = bases[i]
+            semilla = np.zeros((h, w), np.uint8)
+            cv2.ellipse(semilla, (int(cx), int(cy)), (max(int(a * 0.6), 1), max(int(b * 0.6), 1)),
+                        0, 0, 360, 1, -1)
+            cv2.rectangle(semilla, (int(cx - 0.15 * a), int(cy - 1.5 * a)), (int(cx + 0.15 * a), int(cy)), 1, -1)
+            # La figura de detrás no siembra donde está el cuerpo de una de delante.
+            for j in indices:
+                fx, fy, fa, fb = bases[j]
+                if fy > cy + 0.3 * b:
+                    cv2.rectangle(semilla, (int(fx - 0.6 * fa), int(fy - 2.4 * fa)),
+                                  (int(fx + 0.6 * fa), int(fy + fb)), 0, -1)
+            marcas[(semilla > 0) & zona] = i + 1
+        guia = imagen if imagen is not None else np.dstack([(alfa * 255).astype(np.uint8)] * 3)
+        cv2.watershed(np.ascontiguousarray(guia[..., :3]).astype(np.uint8), marcas)
+        lineas = (marcas == -1) & zona
+        marcas[lineas] = 0
+        marcas = np.where(marcas > len(bases), 0, marcas)
+        # Las líneas divisorias pasan a la figura vecina más cercana.
+        if lineas.any():
+            dil = cv2.dilate(marcas.astype(np.float32), np.ones((3, 3), np.uint8)).astype(np.int32)
+            marcas[lineas] = dil[lineas]
+        # Trozos que la divisoria deja sueltos (p. ej. un casco del vecino): cada figura
+        # conserva sólo la parte unida a su peana; el resto pasa a la figura que toca.
+        for i in indices:
+            cx, cy, a, b = bases[i]
+            n_t, et_t = cv2.connectedComponents((marcas == i + 1).astype(np.uint8), connectivity=8)
+            if n_t > 2:
+                x, y = int(np.clip(cx, 0, w - 1)), int(np.clip(cy, 0, h - 1))
+                propia = et_t[y, x] or np.bincount(et_t[et_t > 0]).argmax()
+                marcas[(et_t > 0) & (et_t != propia)] = 0
+        for _ in range(200):
+            huecos = zona & (marcas <= 0)
+            if not huecos.any():
+                break
+            dil = cv2.dilate(np.where(marcas > 0, marcas, 0).astype(np.float32),
+                             np.ones((3, 3), np.uint8)).astype(np.int32)
+            marcas[huecos & (dil > 0)] = dil[huecos & (dil > 0)]
+        propias[zona] = np.where(marcas[zona] > 0, marcas[zona], 0)
+    # Piezas sueltas sin peana (p. ej. la punta de un arma separada): a la figura más cercana.
+    for k in range(1, n):
+        if k in por_comp:
+            continue
+        ys, xs = np.nonzero(etiquetas == k)
+        cx, cy = xs.mean(), ys.mean()
+        j = int(np.argmin([abs(cx - b[0]) + 0.3 * abs(cy - b[1]) for b in bases]))
+        propias[etiquetas == k] = j + 1
+
+    orden = sorted(range(len(bases)), key=lambda i: (bases[i][0], bases[i][1]))
     res = []
-    for cx, cy, a, b in localizar_peanas(alfa):
-        x0, x1 = int(max(cx - a, 0)), int(min(cx + a, w - 1))
-        # Cima de la figura: se sube desde la peana por la silueta, columna a columna,
-        # en la franja central; se limita a una altura razonable para una miniatura
-        # (si otra figura de detrás continúa la silueta, no se la «come»).
-        limite = int(max(cy - 2.2 * 2 * a, 0))
-        cimas = []
-        for x in range(int(max(cx - 0.6 * a, 0)), int(min(cx + 0.6 * a, w - 1)) + 1):
-            y = int(min(cy, h - 1))
-            if not sujeto[y, x]:
-                continue
-            while y > limite and sujeto[y - 1, x]:
-                y -= 1
-            cimas.append(y)
-        y0 = int(min(cimas)) if cimas else int(max(cy - 2 * a, 0))   # el punto más alto (la cabeza)
-        # Armas o brazos que sobresalen de la peana: se amplía lo que esté unido a la
-        # silueta dentro de la altura de la figura (hasta medio ancho de peana más).
-        franja = sujeto[y0:int(min(cy + b, h - 1)) + 1]
-        cols = np.flatnonzero(franja[:, int(max(cx - 1.5 * a, 0)):int(min(cx + 1.5 * a, w - 1)) + 1].any(axis=0))
-        if len(cols):
-            base = int(max(cx - 1.5 * a, 0))
-            x0 = min(x0, base + int(cols[0])) if base + cols[0] >= cx - 1.5 * a else x0
-            x1 = max(x1, base + int(cols[-1]))
-            x0, x1 = int(max(x0, cx - 1.5 * a)), int(min(x1, cx + 1.5 * a))
-        res.append(Figura(cx, cy, a, b, (x0, y0, x1 + 1, int(min(cy + b, h - 1)) + 1)))
-    res.sort(key=lambda f: (f.cx, f.cy))
+    for i in orden:
+        m = cv2.dilate((propias == i + 1).astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+        # Las otras figuras no entran aunque la dilatación las roce.
+        otras = (propias > 0) & (propias != i + 1)
+        res.append(np.where(m & ~otras, alfa, 0).astype(np.float32))
+    return [m for m in res if (m > 0.5).any()]
+
+
+def figuras(alfa: np.ndarray) -> list[Figura]:
+    """Figuras de izquierda a derecha con la caja completa de cada una."""
+    res = []
+    bases = sorted(localizar_peanas(alfa), key=lambda b: (b[0], b[1]))
+    for (cx, cy, a, b), m in zip(bases, mascaras_figuras(alfa)):
+        x0, y0, x1, y1 = caja_sujeto(m, umbral=0.5)
+        res.append(Figura(cx, cy, a, b, (x0, y0, x1, y1)))
     return res
 
 
-def encuadre(caja: tuple[int, int, int, int], prop: float, margen: float,
-             W: int, H: int) -> tuple[int, int, int, int]:
-    """Ventana (x0, y0, x1, y1) con proporción ``prop`` (ancho/alto) que contiene la
-    caja con margen, centrada en ella y sin salirse de la imagen W×H."""
+def encuadre_centrado(caja: tuple[int, int, int, int], prop: float, margen: float) -> tuple[int, int, int, int]:
+    """Ventana con proporción ``prop`` centrada exactamente en la caja, con margen
+    (medido como en el encuadre normal). Puede salirse de la imagen."""
     x0, y0, x1, y1 = caja
     bw, bh = x1 - x0, y1 - y0
-    m = margen * bh
+    m = margen * max(bw, bh)
     ww, hh = bw + 2 * m, bh + 2 * m
     if ww / hh < prop:
         ww = hh * prop
     else:
         hh = ww / prop
-    escala = min(1.0, W / ww, H / hh)          # no puede ser mayor que la foto
-    ww, hh = ww * escala, hh * escala
     iw, ih = int(round(ww)), int(round(hh))
-    if prop == 1.0:
-        iw = ih = min(iw, ih)
+    if abs(prop - 1.0) < 1e-6:
+        iw = ih = max(iw, ih)
     cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-    ix = int(np.clip(round(cx - iw / 2), 0, W - iw))
-    iy = int(np.clip(round(cy - ih / 2), 0, H - ih))
+    ix, iy = int(round(cx - iw / 2)), int(round(cy - ih / 2))
     return ix, iy, ix + iw, iy + ih
 
 
-def proporcion_objetivo(op: OpcionesEstudio, alfa: np.ndarray, W: int, H: int) -> float:
-    """Relación de aspecto de cada foto individual: 1:1 en modo carrusel (como cada
-    parte), la elegida en «Proporción», o la de la foto original."""
+def proporcion_objetivo(op: OpcionesEstudio, alfa: np.ndarray) -> str:
+    """Proporción de cada foto individual (clave de PROPORCIONES u «original»):
+    1:1 en modo carrusel (como cada parte); si no, la elegida en «Proporción»."""
     if partes_carrusel(alfa, op):
-        return 1.0
-    return PROPORCIONES.get(op.proporcion) or (alfa.shape[1] / alfa.shape[0])
+        return "1:1"
+    return op.proporcion
 
 
-def recortes(salida: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio) -> list[np.ndarray]:
-    """Recortes individuales de la imagen final ``salida`` (sólo si hay 2 o más figuras).
+def individuales(salida: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio, imagen: np.ndarray,
+                 primer_plano: np.ndarray | None = None) -> tuple[list[tuple[np.ndarray, str]], int]:
+    """Una imagen por figura, centrada y entera: ([(imagen, "recorte" | "nuevo fondo")], tapadas).
 
-    ``alfa`` es la máscara de la foto original: se recoloca en el lienzo del
-    resultado con el mismo cálculo de encuadre que usó la composición.
+    Las figuras casi ocultas tras otras (se ve menos de un tercio de lo que se ve de
+    una figura típica) no se pueden mostrar enteras: se omiten y se cuentan en ``tapadas``.
+
+    Si el encuadre centrado de la figura cabe dentro de la foto de grupo y no entra
+    ninguna otra figura, se recorta de ``salida`` (sin reprocesar). Si no, esa figura
+    se vuelve a componer sola sobre un fondo nuevo (reutilizando su máscara: no se
+    segmenta otra vez).
     """
+    from dataclasses import replace
+
+    from .composicion import componer
+
+    mascaras = mascaras_figuras(alfa, imagen)
+    if len(mascaras) < 2:
+        return [], 0
+    areas = np.array([(m > 0.5).sum() for m in mascaras], np.float32)
+    visibles = [m for m, ar in zip(mascaras, areas) if ar >= 0.33 * np.median(areas)]
+    tapadas = len(mascaras) - len(visibles)
+    mascaras = visibles
     H, W = salida.shape[:2]
-    lienzo = None
+    desplaz = None
     for dentro in (False, True):
         ox, oy, w_, h_ = calcular_lienzo(alfa, op, dentro_de_la_foto=dentro)
         if (w_, h_) == (W, H):
-            lienzo = np.zeros((H, W), np.float32)
-            _pegar(lienzo, alfa, ox, oy)
+            desplaz = (ox, oy)
             break
-    if lienzo is None:
-        return []
-    figs = figuras(lienzo)
-    if len(figs) < 2:
-        return []
-    prop = proporcion_objetivo(op, alfa, W, H)
+    clave = proporcion_objetivo(op, alfa)
+    prop = PROPORCIONES.get(clave) or (alfa.shape[1] / alfa.shape[0])
+    op_ind = replace(op, carrusel=0, individuales=False, proporcion=clave, reencuadrar=True)
+    total = alfa > 0.5
     res = []
-    for f in figs:
-        x0, y0, x1, y1 = encuadre(f.caja, prop, op.margen, W, H)
-        res.append(salida[y0:y1, x0:x1].copy())
-    return res
+    for m in mascaras:
+        propia = m > 0.5
+        if desplaz is not None:
+            x0, y0, x1, y1 = caja_sujeto(m, umbral=0.5)
+            ox, oy = desplaz
+            vx0, vy0, vx1, vy1 = encuadre_centrado((x0 + ox, y0 + oy, x1 + ox, y1 + oy), prop, op.margen)
+            dentro = vx0 >= 0 and vy0 >= 0 and vx1 <= W and vy1 <= H
+            if dentro:
+                otras = np.zeros((H, W), bool)
+                _pegar(otras, total & ~propia, ox, oy)
+                if otras[vy0:vy1, vx0:vx1].sum() <= 0.0005 * (vx1 - vx0) * (vy1 - vy0):
+                    res.append((salida[vy0:vy1, vx0:vx1].copy(), "recorte"))
+                    continue
+        # Fondo nuevo: la figura sola. Con el suelo real de la foto, las otras figuras
+        # se borran de él (inpainting) para que no reaparezcan.
+        img_i = imagen
+        if op.suelo == "original":
+            otras_orig = cv2.dilate((total & ~propia).astype(np.uint8), np.ones((9, 9), np.uint8))
+            img_i = cv2.inpaint(np.ascontiguousarray(imagen[..., :3]), otras_orig, 7, cv2.INPAINT_TELEA)
+        res.append((componer(img_i, m, op_ind, primer_plano), "nuevo fondo"))
+    return res, tapadas
+
+
+def recortes(salida: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio,
+             imagen: np.ndarray | None = None, primer_plano: np.ndarray | None = None) -> list[np.ndarray]:
+    """Sólo las imágenes de :func:`individuales` (compatibilidad)."""
+    if imagen is None:
+        imagen = salida if salida.shape[:2] == alfa.shape else np.zeros((*alfa.shape, 3), np.uint8)
+    return [im for im, _ in individuales(salida, alfa, op, imagen, primer_plano)[0]]
 
 
 def nombre_individual(base: str, i: int, ext: str = ".png") -> str:
