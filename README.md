@@ -159,6 +159,17 @@ Se guardan la imagen completa antes de cortar (`<nombre>_estudio.png`) y las par
 pestaña **Carrusel** del visor las muestra, la descarga es un ZIP con todo, y la app indica
 cuántas partes aprovechan mejor el espacio en esa foto. Línea de comandos: `--carrusel 3` o `--carrusel auto`.
 
+## Fotos individuales de cada figura (pestaña «Encuadre»)
+
+Marca **Fotos individuales de cada figura**: si en la foto hay varias minis, además de la
+foto de grupo se guarda una por figura (`<nombre>_figura1.png`, … de izquierda a derecha).
+Son **recortes de la imagen final**, sin volver a procesar: se localiza cada peana (aunque
+se toquen o se solapen) y se encuadra esa figura con la proporción objetivo (la de
+«Proporción», o 1:1 si el carrusel está activo). En grupos apretados pueden asomar los
+vecinos en los bordes. Con una sola figura no se genera nada. Se ven en la pestaña
+**Individuales** del visor, van en el ZIP de descarga y en otra prueba con la misma foto se
+sustituyen. Línea de comandos: `--individuales`.
+
 ## Perfiles de ajustes
 
 En la pestaña **Perfiles** del panel puedes guardar todos los ajustes actuales con un

@@ -22,7 +22,7 @@ CAMPOS_ESTUDIO = [
     "halo", "vineteado", "sombra", "reflejo", "reflejo_caida", "oscurecer_borde",
     "corregir_dominante", "negro", "reencuadrar", "margen", "proporcion",
     "descontaminar_bordes", "suelo", "suelo_ajuste", "horizonte", "horizonte_distancia", "horizonte_desenfoque",
-    "horizonte_suelo", "horizonte_altura", "carrusel",
+    "horizonte_suelo", "horizonte_altura", "carrusel", "individuales",
 ]
 CAMPOS = ["modelo", "rellenar_huecos", *CAMPOS_ESTUDIO]
 

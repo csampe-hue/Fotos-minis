@@ -62,6 +62,8 @@ def main(argv=None) -> None:
     p.add_argument("--carrusel", choices=["auto", "2", "3", "4", "5", "6"],
                    help="divide en N cuadrados contiguos para un carrusel de Instagram "
                         "(auto: el N con el que las minis ocupan más área)")
+    p.add_argument("--individuales", action="store_true",
+                   help="si hay varias figuras, guarda además una foto recortada de cada una")
     p.add_argument("--sin-reencuadre", action="store_true", help="mantiene el tamaño original")
     p.add_argument("--rellenar-huecos", type=int, metavar="PX",
                    help="rellena huecos interiores de la máscara menores de PX píxeles")
@@ -89,6 +91,8 @@ def main(argv=None) -> None:
     for opcion, campo in OPCIONES.items():
         if getattr(a, opcion) is not None:
             valores[campo] = getattr(a, opcion)
+    if a.individuales:
+        valores["individuales"] = True
     if a.sin_reencuadre:
         valores["reencuadrar"] = False
     op, modelo, huecos = perfiles.a_opciones(valores)
@@ -115,6 +119,18 @@ def main(argv=None) -> None:
             for i, parte in enumerate(dividir(r.estudio, n), 1):
                 guardar(parte, a.salida / nombre_parte(f.stem, i, n, ".jpg"),
                         quality=a.calidad, subsampling=0)
+        from .individuales import borrar_individuales, nombre_individual, recortes
+        borrar_individuales(a.salida, f.stem)
+        if op.individuales:
+            import numpy as np
+            from PIL import Image
+            trozos = recortes(np.asarray(r.estudio), np.asarray(r.mascara, np.float32) / 255.0, op)
+            if trozos:
+                print(f"    {len(trozos)} figuras: fotos individuales")
+            for i, trozo in enumerate(trozos, 1):
+                im = Image.fromarray(trozo)
+                im.info.update(r.estudio.info)
+                guardar(im, a.salida / nombre_individual(f.stem, i, ".jpg"), quality=a.calidad, subsampling=0)
         if a.recorte:
             guardar(r.recorte, a.salida / f"{f.stem}_recorte.png")
         print(f"    -> {destino}")

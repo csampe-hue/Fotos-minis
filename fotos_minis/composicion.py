@@ -44,6 +44,7 @@ class OpcionesEstudio:
     reencuadrar: bool = True
     margen: float = 0.12            # margen alrededor del sujeto (fracción del lado mayor)
     proporcion: str = "original"    # "original", "1:1", "4:5", "3:2", "2:3", "16:9"
+    individuales: bool = False      # además, una foto recortada por figura (si hay varias)
     carrusel: int = 0               # 2 a 6: imagen N:1 para dividir en N cuadrados (Instagram);
                                     # -1 = automático (el N con el que las minis ocupan más área)
 
@@ -274,23 +275,13 @@ def peanas(alfa: np.ndarray) -> list[dict]:
     return res
 
 
-def sombras_contacto(h: int, w: int, geo: dict, fuerza: float) -> np.ndarray:
-    """Factor multiplicativo (≤1) con la sombra de contacto de las peanas.
+def mascara_peanas(alfa: np.ndarray, lista: list[dict]) -> tuple[np.ndarray, float, float]:
+    """Máscara con sólo las peanas de la silueta (sin piernas, brazos ni armas).
 
-    Funciona con cualquier número de figuras, aunque se solapen (fotos de grupo):
-    1. Las peanas se aíslan de la silueta con una apertura morfológica ancha y baja,
-       que conserva las formas anchas y planas y elimina piernas, brazos y armas.
-    2. Línea de contacto: justo debajo de cada borde inferior visible de una peana
-       (donde la peana toca el suelo apenas llega luz) el suelo se oscurece mucho.
-    3. Penumbra: un oscurecimiento amplio y suave alrededor de las peanas.
-    Las distancias se miden en vertical en la escala de la peana (a·r), así que la
-    sombra respeta la perspectiva del suelo.
+    Devuelve (máscara, ancho típico de peana, semieje vertical típico) en píxeles.
     """
-    alfa = geo.get("alfa")
-    if alfa is None:
-        return np.ones((h, w), np.float32)
+    h, w = alfa.shape
     sujeto = alfa > 0.5
-    lista = geo.get("peanas") or [geo]
     ancho = float(np.median([g["ancho"] for g in lista]))
     r = float(np.median([g["inclinacion"] for g in lista]))
     vertical = max(ancho / 2 * r, 3.0)            # semieje vertical típico de una peana (px)
@@ -311,6 +302,26 @@ def sombras_contacto(h: int, w: int, geo: dict, fuerza: float) -> np.ndarray:
         actual = np.where(sujeto[y], actual + 1, 0.0)
         hasta_abajo[y] = actual
     peana &= hasta_abajo <= 2.5 * vertical
+    return peana, ancho, vertical
+
+
+def sombras_contacto(h: int, w: int, geo: dict, fuerza: float) -> np.ndarray:
+    """Factor multiplicativo (≤1) con la sombra de contacto de las peanas.
+
+    Funciona con cualquier número de figuras, aunque se solapen (fotos de grupo):
+    1. Las peanas se aíslan de la silueta con una apertura morfológica ancha y baja,
+       que conserva las formas anchas y planas y elimina piernas, brazos y armas.
+    2. Línea de contacto: justo debajo de cada borde inferior visible de una peana
+       (donde la peana toca el suelo apenas llega luz) el suelo se oscurece mucho.
+    3. Penumbra: un oscurecimiento amplio y suave alrededor de las peanas.
+    Las distancias se miden en vertical en la escala de la peana (a·r), así que la
+    sombra respeta la perspectiva del suelo.
+    """
+    alfa = geo.get("alfa")
+    if alfa is None:
+        return np.ones((h, w), np.float32)
+    sujeto = alfa > 0.5
+    peana, ancho, vertical = mascara_peanas(alfa, geo.get("peanas") or [geo])
 
     # Distancia (en filas) bajo el último borde inferior de peana, por columnas.
     borde = peana & ~np.vstack([sujeto[1:], np.zeros((1, w), bool)])

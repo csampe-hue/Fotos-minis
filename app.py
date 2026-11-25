@@ -24,6 +24,7 @@ from fotos_minis import perfiles, preferencias
 from fotos_minis.perfiles import CAMPOS_ESTUDIO, FABRICA
 from fotos_minis.carrusel import borrar_partes, dividir, nombre_parte, partes_de_imagen
 from fotos_minis.composicion import CARRUSEL_AUTO, partes_carrusel
+from fotos_minis.individuales import borrar_individuales, nombre_individual, recortes
 from fotos_minis.composicion import caja_sujeto
 from fotos_minis.proceso import cargar, guardar, procesar
 from fotos_minis.segmentacion import MODELO_POR_DEFECTO, MODELOS, mascara_bruta, refinar_mascara
@@ -116,12 +117,12 @@ def procesar_una(ruta, modelo, huecos, *ajustes, request: gr.Request = None, pro
     if ruta is None:
         # Al sustituir una foto por otra el componente pasa un instante por "vacío":
         # no se borra el resultado (sólo se borra al pulsar la X, ver limpiar()).
-        return gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
+        return gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
     # Al aplicar un perfil cambian muchos controles a la vez y cada uno lanza un
     # evento: si los valores son los mismos que los del último resultado, no se repite.
     firma = (ruta, modelo, huecos, *ajustes)
     if firma == _ultimas_firmas.get(sesion):
-        return gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
+        return gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
     img = cargar(ruta)
     arr = np.asarray(img)
     if _clave(arr, modelo, huecos) not in _cache_mascaras:
@@ -180,9 +181,34 @@ def procesar_una(ruta, modelo, huecos, *ajustes, request: gr.Request = None, pro
                 aviso += (f". Para esta foto, con **{mejor} partes** las minis ocuparían más espacio "
                           "(o elige «Auto»).")
 
+    # Fotos individuales: recortes de la imagen final, uno por figura (si hay varias).
+    borrar_individuales(carpeta_fotos(), base)
+    individuales = None
+    if op.individuales:
+        trozos = recortes(out, alfa, op)
+        if trozos:
+            individuales = []
+            if descarga == destino:                       # aún no hay ZIP (sin carrusel)
+                descarga = temporal / f"{base}_fotos.zip"
+                with zipfile.ZipFile(descarga, "w") as z:
+                    z.write(destino, destino.name)
+            with zipfile.ZipFile(descarga, "a") as z:
+                for i, trozo in enumerate(trozos, 1):
+                    nombre = nombre_individual(base, i)
+                    im = Image.fromarray(trozo)
+                    im.info.update(img.info)
+                    guardar(im, temporal / nombre)
+                    _guardar_copia(temporal / nombre, nombre)
+                    z.write(temporal / nombre, nombre)
+                    individuales.append((str(temporal / nombre), f"Figura {i}"))
+            aviso += ("" if aviso.endswith(".") else ".") + f" Además, {len(trozos)} fotos individuales (`{nombre_individual(base, 1)}`…)"
+        else:
+            aviso += ("" if aviso.endswith(".") else ".") + " Sólo se detecta una figura: no se generan fotos individuales."
+
     mascara = Image.fromarray(np.round(alfa * 255).astype(np.uint8))
     _ultimas_firmas[sesion] = firma
-    return ((Image.fromarray(antes), Image.fromarray(out)), mascara, str(descarga), aviso, galeria)
+    return ((Image.fromarray(antes), Image.fromarray(out)), mascara, str(descarga), aviso, galeria,
+            individuales)
 
 
 def procesar_desde_ui(request: gr.Request, progress=gr.Progress(), *entradas):
@@ -265,6 +291,12 @@ def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
                     nombre = nombre_parte(Path(f).stem, i, n)
                     guardar(parte, carpeta / nombre)
                     z.write(carpeta / nombre, nombre)
+            if op.individuales:
+                alfa_f = np.asarray(r.mascara, np.float32) / 255.0
+                for i, trozo in enumerate(recortes(np.asarray(r.estudio), alfa_f, op), 1):
+                    nombre = nombre_individual(Path(f).stem, i)
+                    guardar(Image.fromarray(trozo), carpeta / nombre)
+                    z.write(carpeta / nombre, nombre)
     guardado = _guardar_copia(zip_path, f"fotos_estudio_{datetime.now():%Y-%m-%d_%H-%M-%S}.zip")
     return str(zip_path), _aviso_guardado(guardado)
 
@@ -272,7 +304,7 @@ def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
 def limpiar(request: gr.Request = None):
     """La X de la foto original: se vacía también el resultado."""
     _ultimas_firmas.pop(_sesion(request), None)
-    return None, None, None, "", None
+    return None, None, None, "", None, None
 
 
 # En la aplicación de escritorio (escritorio.py) cerrar consiste en cerrar su ventana.
@@ -342,7 +374,7 @@ CSS = """
 #apariencia .wrap { flex-wrap: nowrap; gap: 6px; }
 #apariencia label { padding: 6px 10px !important; white-space: nowrap; }
 #visor-tabs .tabitem { padding: 0 !important; }
-#comparador, #mascara, #galeria { height: calc(100vh - 405px) !important; min-height: 360px; }
+#comparador, #mascara, #galeria, #galeria-ind { height: calc(100vh - 405px) !important; min-height: 360px; }
 /* Las imágenes ocupan todo el alto disponible del visor, sin deformarse. */
 #comparador .content, #comparador .content img,
 #mascara .image-container, #mascara img { height: 100% !important; max-height: none !important; }
@@ -351,7 +383,7 @@ CSS = """
   #cabecera { flex-wrap: wrap !important; }
   #titulo { flex: 1 1 100% !important; min-width: 100% !important; }
   #panel { position: static; max-height: none; overflow: visible; }
-  #comparador, #mascara, #galeria { height: 70vh !important; }
+  #comparador, #mascara, #galeria, #galeria-ind { height: 70vh !important; }
 }
 """
 
@@ -436,6 +468,10 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                                                 info="Imagen N:1 dividida en N cuadrados que, al deslizar, "
                                                      "se ven como una sola imagen continua. «Auto» elige el número de "
                                                      "partes con el que las minis ocupan más área")
+                            individuales = gr.Checkbox(False, label="Fotos individuales de cada figura",
+                                                       info="Si hay varias figuras, además de la foto de grupo "
+                                                            "se recorta una por figura con la misma proporción "
+                                                            "(1:1 en carrusel)")
 
                 # ---------------- Visor ----------------
                 with gr.Column(scale=3, min_width=480):
@@ -447,7 +483,10 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                         with gr.Tab("Carrusel", id="carrusel_tab"):
                             galeria = gr.Gallery(show_label=False, columns=4, object_fit="contain",
                                                  elem_id="galeria", allow_preview=True)
-                    descarga = gr.DownloadButton("Descargar resultado (PNG sin pérdida; ZIP en modo carrusel)",
+                        with gr.Tab("Individuales", id="individuales_tab"):
+                            galeria_ind = gr.Gallery(show_label=False, columns=4, object_fit="contain",
+                                                     elem_id="galeria-ind", allow_preview=True)
+                    descarga = gr.DownloadButton("Descargar resultado (PNG sin pérdida; ZIP si hay carrusel o individuales)",
                                                  variant="primary")
                     guardado = gr.Markdown(elem_id="guardado")
                     with gr.Row(elem_id="fila-carpeta"):
@@ -470,9 +509,9 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
 
     ajustes = [halo, vineteado, sombra, reflejo, caida, oscurecer, dominante, negro, reencuadrar,
                margen, proporcion, descontaminar, suelo, suelo_ajuste, horizonte, h_distancia, h_desenfoque,
-               h_suelo, h_altura, carrusel]
+               h_suelo, h_altura, carrusel, individuales]
     entradas = [entrada, modelo, huecos, *ajustes]
-    salidas = [comparador, mascara, descarga, guardado, galeria]
+    salidas = [comparador, mascara, descarga, guardado, galeria, galeria_ind]
     boton.click(procesar_desde_ui, entradas, salidas)
     entrada.change(procesar_desde_ui, entradas, salidas)
     entrada.clear(limpiar, None, salidas)
