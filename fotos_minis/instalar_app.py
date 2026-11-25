@@ -22,6 +22,7 @@ from pathlib import Path
 from PIL import Image
 
 from .icono import desde_imagen
+from .icono import predeterminado as icono_predeterminado_repo
 from .icono import guardar as guardar_icono
 
 NOMBRE = "Fotos Minis"
@@ -123,7 +124,7 @@ def elegir_icono(proyecto: Path, icono: Path | None = None, predeterminado: bool
         return im
     if personal.exists():
         return Image.open(personal).convert("RGBA")
-    return guardar_icono(proyecto / "recursos" / "icono.png")
+    return icono_predeterminado_repo(proyecto / "recursos" / "icono.png")
 
 
 def crear_app(destino: Path, proyecto: Path = PROYECTO, icono: Path | None = None,

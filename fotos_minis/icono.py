@@ -94,8 +94,20 @@ def desde_imagen(ruta: Path) -> Image.Image:
     return lienzo
 
 
+PREDETERMINADO = Path(__file__).resolve().parent.parent / "recursos" / "icono.png"
+
+
+def predeterminado(ruta: Path = PREDETERMINADO) -> Image.Image:
+    """Icono por defecto: la imagen incluida en el repositorio (recursos/icono.png);
+    si faltara, el dibujado por código."""
+    if ruta.is_file():
+        im = Image.open(ruta).convert("RGBA")
+        return im if im.size == (LADO, LADO) else im.resize((LADO, LADO), Image.LANCZOS)
+    return generar()
+
+
 def guardar(png: Path, icns: Path | None = None, imagen: Image.Image | None = None) -> Image.Image:
-    im = imagen if imagen is not None else generar()
+    im = imagen if imagen is not None else predeterminado()
     png.parent.mkdir(parents=True, exist_ok=True)
     im.save(png)
     if icns is not None:
@@ -105,4 +117,5 @@ def guardar(png: Path, icns: Path | None = None, imagen: Image.Image | None = No
 
 
 if __name__ == "__main__":
-    guardar(Path("recursos/icono.png"), Path("recursos/icono.icns"))
+    # Regenera el .icns a partir del icono por defecto (no lo sobrescribe).
+    predeterminado().save(Path("recursos/icono.icns"))

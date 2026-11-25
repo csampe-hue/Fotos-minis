@@ -71,3 +71,20 @@ def test_ruta_arrastrada_desde_terminal():
     from fotos_minis.instalar_app import limpiar_ruta
     assert str(limpiar_ruta(r"/Users/yo/Mis\ fotos/mini\ (1).jpg ")) == "/Users/yo/Mis fotos/mini (1).jpg"
     assert str(limpiar_ruta("'/Users/yo/Mis fotos/mini.heic'")) == "/Users/yo/Mis fotos/mini.heic"
+
+
+def test_el_icono_por_defecto_es_el_del_repositorio_y_no_se_sobrescribe(tmp_path):
+    import hashlib
+    import shutil
+    from pathlib import Path
+    from fotos_minis.instalar_app import icono_en_uso
+    repo = Path(__file__).resolve().parent.parent / "recursos" / "icono.png"
+    proyecto = tmp_path / "proyecto"
+    (proyecto / "recursos").mkdir(parents=True)
+    shutil.copy(repo, proyecto / "recursos" / "icono.png")
+    antes = hashlib.md5((proyecto / "recursos" / "icono.png").read_bytes()).hexdigest()
+    crear_app(tmp_path / "Apps", proyecto)
+    assert hashlib.md5((proyecto / "recursos" / "icono.png").read_bytes()).hexdigest() == antes
+    usado = Image.open(icono_en_uso(proyecto)).convert("RGBA")
+    import numpy as np
+    assert np.array_equal(np.asarray(usado), np.asarray(Image.open(repo).convert("RGBA")))
