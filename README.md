@@ -168,6 +168,10 @@ de «Proporción», o 1:1 si el carrusel está activo).
 
 - Cada figura es todo lo que está unido a su peana; si varias se solapan, se separan por la
   divisoria entre ellas (la de delante tiene preferencia).
+- Las peanas se localizan aunque se toquen o solapen, aunque haya peanas de tamaños
+  distintos (p. ej. 25 y 50 mm, si no se tocan), peanas cuadradas u ovaladas, lanzas que
+  llegan al suelo o unen dos figuras y capas que se abren hasta la peana. Límite conocido:
+  peanas de tamaños distintos **pegadas** entre sí se miden con un único tamaño.
 - Si el encuadre centrado cabe en la foto de grupo y no asoma ninguna otra figura, se
   **recorta** de ella. Si no, esa figura se **vuelve a componer sola con un fondo nuevo**
   (mismo fondo, suelo y luz; se reutiliza su máscara, no se segmenta otra vez).

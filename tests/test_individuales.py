@@ -173,3 +173,72 @@ def test_superres_amplia_sin_costuras():
     assert r.shape == (1200, 1200, 3)
     d = np.abs(np.diff(r.mean(axis=2), axis=1)).mean(axis=0)
     assert d[4 * TESELA - 1] < 3 * np.median(d) + 1           # sin escalón en la costura
+
+
+# --------------------------------------------------------------------------- #
+# Casos difíciles para localizar peanas
+# --------------------------------------------------------------------------- #
+
+def _mini(alfa, cx, cy, a=60, b=16, alto=110):
+    yy, xx = np.mgrid[0:alfa.shape[0], 0:alfa.shape[1]]
+    cuerpo = (np.abs(xx - cx) < 14) & (yy > cy - alto) & (yy < cy)
+    cabeza = ((xx - cx) / 12) ** 2 + ((yy - (cy - alto - 8)) / 12) ** 2 <= 1
+    peana = ((xx - cx) / a) ** 2 + ((yy - cy) / b) ** 2 <= 1
+    alfa[cuerpo | cabeza | peana] = 1
+    return alfa
+
+
+def _centros(alfa):
+    return sorted((round(cx), round(cy)) for cx, cy, _, _ in localizar_peanas(alfa))
+
+
+def _cerca(centros, esperados, tol=12):
+    return len(centros) == len(esperados) and all(
+        abs(a - c) <= tol and abs(b - d) <= tol for (a, b), (c, d) in zip(centros, sorted(esperados)))
+
+
+def test_lanza_que_une_dos_figuras():
+    """Una lanza horizontal une dos figuras separadas en una sola pieza de la silueta:
+    antes se perdía una peana y las otras salían desplazadas."""
+    import cv2
+    pos = [(200, 330), (360, 330), (520, 330)]
+    alfa = np.zeros((420, 720), np.float32)
+    for p in pos:
+        _mini(alfa, *p)
+    cv2.line(alfa, (200, 300), (360, 300), 1, 6)
+    assert _cerca(_centros(alfa), pos)
+    assert len(figuras(alfa)) == 3
+
+
+def test_capa_ancha_no_crea_peana_fantasma():
+    """Una capa que se abre hasta tocar la peana parece otra peana de detrás."""
+    import cv2
+    alfa = _mini(np.zeros((420, 720), np.float32), 360, 330)
+    cv2.fillPoly(alfa, [np.array([[345, 210], [375, 210], [450, 322], [270, 322]], np.int32)], 1)
+    assert _cerca(_centros(alfa), [(360, 330)])
+    for p in [(200, 330), (520, 330)]:
+        _mini(alfa, *p)
+    assert _cerca(_centros(alfa), [(200, 330), (360, 330), (520, 330)])
+
+
+def test_peanas_de_tamanos_distintos():
+    """Peana de 50 mm entre dos de 25 mm: cada pieza mide su propia peana (antes la
+    grande se partía en tres pequeñas)."""
+    alfa = np.zeros((420, 720), np.float32)
+    _mini(alfa, 170, 330, 40, 11, 80)
+    _mini(alfa, 340, 330, 80, 21, 140)
+    _mini(alfa, 520, 330, 40, 11, 80)
+    assert _cerca(_centros(alfa), [(170, 330), (340, 330), (520, 330)])
+
+
+def test_fila_trasera_que_asoma_por_los_lados():
+    """Dos delante y dos detrás desplazadas: el borde inferior no forma muescas sino
+    escalones (donde acaba una peana delantera asoma la de detrás)."""
+    pos = [(220, 340), (360, 340), (290, 300), (430, 300)]
+    alfa = np.zeros((420, 720), np.float32)
+    for p in pos:
+        _mini(alfa, *p)
+    assert _cerca(_centros(alfa), pos)
+    import cv2                                                     # también en foto grande
+    grande = cv2.resize(alfa, (2880, 1680), interpolation=cv2.INTER_LINEAR)
+    assert _cerca([(round(x / 4), round(y / 4)) for x, y in _centros(grande)], pos)

@@ -81,22 +81,47 @@ def caja_sujeto(alfa: np.ndarray, umbral: float = 0.05) -> tuple[int, int, int, 
     return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
 
 
+def sin_detalles_finos(binaria: np.ndarray) -> np.ndarray:
+    """Silueta sin estructuras finas (lanzas, astas, varas, cadenas...).
+
+    Una lanza que llega al suelo junto a la peana ensancha la franja inferior de la
+    silueta, y una que cruza de una figura a otra las une en una sola pieza. Una
+    apertura con un disco del 4 % del alto de cada pieza las borra y conserva lo
+    grueso (peanas, cuerpos). Sólo se usa para medir peanas, nunca para el recorte.
+    """
+    binaria = binaria.astype(np.uint8)
+    n, etiquetas, stats, _ = cv2.connectedComponentsWithStats(binaria, connectivity=8)
+    res = np.zeros(binaria.shape, bool)
+    for k in range(1, n):
+        x, y, ww, hh, _ = stats[k]
+        g = max(int(round(0.04 * hh)), 3) | 1
+        trozo = (etiquetas[y:y + hh, x:x + ww] == k).astype(np.uint8)
+        abierto = cv2.morphologyEx(trozo, cv2.MORPH_OPEN,
+                                   cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (g, g)))
+        res[y:y + hh, x:x + ww] |= (abierto if abierto.any() else trozo) > 0
+    return res
+
+
 def geometria_peana(alfa: np.ndarray) -> dict:
     """Estima la posición y anchura de la base del sujeto (la peana).
 
     Se analiza la franja inferior de la silueta: su anchura da el diámetro de la
-    peana y su borde inferior, la línea de contacto con el suelo.
+    peana y su borde inferior, la línea de contacto con el suelo. Las estructuras
+    finas (una lanza apoyada en el suelo) no cuentan.
     """
     x0, y0, x1, y1 = caja_sujeto(alfa)
     alto = y1 - y0
-    franja = alfa[max(y1 - max(int(alto * 0.15), 2), y0):y1, x0:x1] > 0.5
+    solido = sin_detalles_finos(alfa > 0.5)
+    if solido.any():
+        y1 = int(np.nonzero(solido.any(axis=1))[0].max()) + 1
+    franja = solido[max(y1 - max(int(alto * 0.15), 2), y0):y1, x0:x1]
     cols = np.nonzero(franja.any(axis=0))[0]
     if len(cols) == 0:
         cx, ancho = (x0 + x1) / 2, (x1 - x0)
     else:
         cx, ancho = x0 + (cols.min() + cols.max()) / 2, cols.max() - cols.min() + 1
     # Línea de contacto: la fila más baja del sujeto en cada columna, mediana central.
-    colsub = alfa[:, x0:x1] > 0.5
+    colsub = solido[:, x0:x1]
     fondo_col = np.where(colsub.any(axis=0), colsub.shape[0] - 1 - np.argmax(colsub[::-1], axis=0), -1)
     validos = fondo_col[fondo_col >= 0]
     y_suelo = float(np.percentile(validos, 95)) if len(validos) else float(y1)
@@ -261,19 +286,47 @@ def fondo_estudio(h: int, w: int, geo: dict, op: OpcionesEstudio) -> np.ndarray:
     return np.clip(fondo, 0, 1)
 
 
-def peanas(alfa: np.ndarray) -> list[dict]:
-    """Geometría de cada peana: una por figura separada (fotos de grupo)."""
-    binaria = (alfa > 0.5).astype(np.uint8)
-    n, etiquetas, stats, _ = cv2.connectedComponentsWithStats(binaria, connectivity=8)
+def piezas_apoyadas(alfa: np.ndarray, minimo: float = 0.05) -> list[np.ndarray]:
+    """Piezas de la silueta (sin estructuras finas) que se apoyan en el suelo.
+
+    Cada pieza lleva una o varias peanas. Se descartan las piezas pequeñas (menos de
+    ``minimo`` del área de la mayor) y las que no se apoyan en el suelo: al borrar
+    las estructuras finas, un cuerpo con tobillos finos puede quedar suelto encima de
+    su peana, y su borde inferior no es una peana.
+    """
+    sujeto = alfa > 0.5
+    solido = sin_detalles_finos(sujeto)
+    n, etiquetas, stats, _ = cv2.connectedComponentsWithStats(solido.astype(np.uint8), connectivity=8)
     if n <= 1:
-        return [geometria_peana(alfa)]
+        return []
     mayor = stats[1:, cv2.CC_STAT_AREA].max()
+    h = alfa.shape[0]
     res = []
     for k in range(1, n):
-        if stats[k, cv2.CC_STAT_AREA] < 0.05 * mayor:
+        x, y, ww, hh, area = stats[k]
+        if area < minimo * mayor:
             continue
-        res.append(geometria_peana(np.where(etiquetas == k, alfa, 0).astype(np.float32)))
+        pieza = etiquetas[y:y + hh, x:x + ww] == k
+        cols = np.flatnonzero(pieza.any(axis=0))
+        fondo = y + hh - 1 - np.argmax(pieza[::-1, cols], axis=0)
+        # ¿Hay más silueta justo debajo (a menos de 3 % de su alto)? Entonces descansa
+        # sobre otra parte de la figura, no sobre el suelo.
+        hueco = max(int(0.03 * hh), 2)
+        debajo = np.array([sujeto[f + 2:min(f + 2 + hueco, h), x + c].any() for f, c in zip(fondo, cols)])
+        if debajo.mean() > 0.5:
+            continue
+        m = np.zeros(alfa.shape, bool)
+        m[y:y + hh, x:x + ww] = pieza
+        res.append(m)
     return res
+
+
+def peanas(alfa: np.ndarray) -> list[dict]:
+    """Geometría de cada peana: una por figura separada (fotos de grupo)."""
+    piezas = piezas_apoyadas(alfa)
+    if not piezas:
+        return [geometria_peana(alfa)]
+    return [geometria_peana(np.where(p, alfa, 0).astype(np.float32)) for p in piezas]
 
 
 def mascara_peanas(alfa: np.ndarray, lista: list[dict]) -> tuple[np.ndarray, float, float]:
