@@ -186,7 +186,10 @@ def procesar_una(ruta, modelo, huecos, *ajustes, request: gr.Request = None, pro
     borrar_individuales(carpeta_fotos(), base)
     individuales = None
     if op.individuales:
-        lista, tapadas = fotos_individuales(out, alfa, op, arr, primer_plano)
+        avisos_sr: list[str] = []
+        lista, tapadas = fotos_individuales(out, alfa, op, arr, primer_plano, avisos=avisos_sr)
+        for msg in avisos_sr:
+            gr.Warning(msg)
         trozos = [im for im, _ in lista]
         if trozos:
             individuales = []
@@ -299,7 +302,11 @@ def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
                     z.write(carpeta / nombre, nombre)
             if op.individuales:
                 alfa_f = np.asarray(r.mascara, np.float32) / 255.0
-                lista, _ = fotos_individuales(np.asarray(r.estudio), alfa_f, op, np.asarray(cargar(f)))
+                avisos_sr: list[str] = []
+                lista, _ = fotos_individuales(np.asarray(r.estudio), alfa_f, op, np.asarray(cargar(f)),
+                                              avisos=avisos_sr)
+                for msg in avisos_sr:
+                    gr.Warning(f"{Path(f).name}: {msg}")
                 for i, (trozo, _) in enumerate(lista, 1):
                     nombre = nombre_individual(Path(f).stem, i)
                     guardar(Image.fromarray(trozo), carpeta / nombre)
@@ -481,8 +488,9 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                                                             "(1:1 en carrusel)")
                             superres = gr.Radio([("No", 0), ("×2", 2), ("×4", 4)], value=0,
                                                 label="Super-resolución (IA) de las fotos individuales",
-                                                info="Más nitidez en los recortes pequeños. Tarda unos "
-                                                     "segundos por figura; máximo 4096 px")
+                                                info="Desactivada por defecto. Más nitidez en los recortes "
+                                                     "pequeños, pero la IA reinterpreta los detalles finos. "
+                                                     "Tarda unos segundos por figura; máximo 4096 px")
 
                 # ---------------- Visor ----------------
                 with gr.Column(scale=3, min_width=480):

@@ -173,3 +173,66 @@ def test_superres_amplia_sin_costuras():
     assert r.shape == (1200, 1200, 3)
     d = np.abs(np.diff(r.mean(axis=2), axis=1)).mean(axis=0)
     assert d[4 * TESELA - 1] < 3 * np.median(d) + 1           # sin escalón en la costura
+
+
+def test_superres_desactivada_por_defecto():
+    from fotos_minis.perfiles import valores_fabrica
+    assert OpcionesEstudio().superres == 0
+    assert valores_fabrica()["superres"] == 0
+
+
+def test_superres_x2_por_teselas_igual_que_reducir_x4():
+    """×2 se reduce tesela a tesela (sin guardar el ×4 entero) y da lo mismo que reducir
+    la imagen ×4 completa."""
+    import cv2
+    from fotos_minis.superres import TESELA, _ampliar_ia, disponible
+    if not disponible():
+        pytest.skip("modelo de super-resolución no incluido")
+    rng = np.random.default_rng(0)
+    img = cv2.GaussianBlur(rng.integers(0, 255, (TESELA + 37, TESELA + 11, 3), np.uint8), (5, 5), 0)
+    x2 = _ampliar_ia(img, 2)
+    ref = cv2.resize(_ampliar_ia(img, 4), (img.shape[1] * 2, img.shape[0] * 2), interpolation=cv2.INTER_AREA)
+    assert x2.shape == ref.shape
+    assert np.abs(x2.astype(int) - ref.astype(int)).max() <= 1
+
+
+def test_superres_imagen_grande_limita_la_memoria(monkeypatch):
+    """Con el tope de LADO_MAXIMO se usa el factor entero más pequeño que llega a él."""
+    import fotos_minis.superres as sr
+    llamadas = []
+    monkeypatch.setattr(sr, "disponible", lambda: True)
+    monkeypatch.setattr(sr, "_ampliar_ia", lambda img, f: (llamadas.append(f),
+                        np.zeros((img.shape[0] * f, img.shape[1] * f, 3), np.uint8))[1])
+    r = sr.ampliar(np.zeros((300, 3000, 3), np.uint8), 4)        # tope: ×1,365 -> base ×2
+    assert llamadas == [2] and r.shape == (410, 4096, 3)
+    r = sr.ampliar(np.zeros((100, 1500, 3), np.uint8), 4)        # ×2,73 -> base ×4
+    assert llamadas == [2, 4] and r.shape[1] == 4096
+    img = np.zeros((100, 4000, 3), np.uint8)                     # ya es grande: sin cambios
+    assert sr.ampliar(img, 4) is img and llamadas == [2, 4]
+
+
+def test_superres_sin_modelo_sigue_y_avisa(monkeypatch):
+    import fotos_minis.superres as sr
+    monkeypatch.setattr(sr, "MODELO", sr.MODELO.with_name("no_existe.onnx"))
+    with pytest.raises(sr.ErrorSuperres):
+        sr.ampliar(np.zeros((50, 50, 3), np.uint8), 2)
+    img, alfa = _grupo([(110, 300), (530, 300)], w=640)
+    op = OpcionesEstudio(proporcion="1:1", margen=0.05, superres=2)
+    out = componer(img, alfa, op)
+    avisos = []
+    con = individuales(out, alfa, op, img, avisos=avisos)[0]
+    sin = individuales(out, alfa, OpcionesEstudio(proporcion="1:1", margen=0.05), img)[0]
+    assert [a.shape for a, _ in con] == [s.shape for s, _ in sin]   # se guardan sin ampliar
+    assert len(avisos) == 1 and "super-resolución" in avisos[0]      # un solo aviso
+
+
+def test_superres_fallo_de_inferencia(monkeypatch):
+    import fotos_minis.superres as sr
+
+    def revienta(img, f):
+        raise MemoryError
+    monkeypatch.setattr(sr, "disponible", lambda: True)
+    monkeypatch.setattr(sr, "_ampliar_ia", revienta)
+    img = np.zeros((40, 40, 3), np.uint8)
+    r, aviso = sr.ampliar_o_aviso(img, 4)
+    assert r is img and "memoria" in aviso
