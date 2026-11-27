@@ -318,8 +318,12 @@ def proporcion_objetivo(op: OpcionesEstudio, alfa: np.ndarray) -> str:
 
 
 def individuales(salida: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio, imagen: np.ndarray,
-                 primer_plano: np.ndarray | None = None) -> tuple[list[tuple[np.ndarray, str]], int]:
+                 primer_plano: np.ndarray | None = None,
+                 avisos: list[str] | None = None) -> tuple[list[tuple[np.ndarray, str]], int]:
     """Una imagen por figura, centrada y entera: ([(imagen, "recorte" | "nuevo fondo")], tapadas).
+
+    Si ``op.superres`` es 2 o 4 se amplían con IA; si eso falla, la foto se deja sin
+    ampliar y el motivo se añade a ``avisos`` (una vez, aunque falle en varias figuras).
 
     Las figuras casi ocultas tras otras (se ve menos de un tercio de lo que se ve de
     una figura típica) no se pueden mostrar enteras: se omiten y se cuentan en ``tapadas``.
@@ -363,7 +367,7 @@ def individuales(salida: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio, imag
                 otras = np.zeros((H, W), bool)
                 _pegar(otras, total & ~propia, ox, oy)
                 if otras[vy0:vy1, vx0:vx1].sum() <= 0.0005 * (vx1 - vx0) * (vy1 - vy0):
-                    res.append((_mejorar(salida[vy0:vy1, vx0:vx1].copy(), op), "recorte"))
+                    res.append((_mejorar(salida[vy0:vy1, vx0:vx1].copy(), op, avisos), "recorte"))
                     continue
         # Fondo nuevo: la figura sola. Con el suelo real de la foto, las otras figuras
         # se borran de él (inpainting) para que no reaparezcan.
@@ -371,15 +375,19 @@ def individuales(salida: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio, imag
         if op.suelo == "original":
             otras_orig = cv2.dilate((total & ~propia).astype(np.uint8), np.ones((9, 9), np.uint8))
             img_i = cv2.inpaint(np.ascontiguousarray(imagen[..., :3]), otras_orig, 7, cv2.INPAINT_TELEA)
-        res.append((_mejorar(componer(img_i, m, op_ind, primer_plano), op), "nuevo fondo"))
+        res.append((_mejorar(componer(img_i, m, op_ind, primer_plano), op, avisos), "nuevo fondo"))
     return res, tapadas
 
 
-def _mejorar(img: np.ndarray, op: OpcionesEstudio) -> np.ndarray:
-    """Super-resolución opcional (Real-ESRGAN) de una foto individual."""
-    if op.superres in (2, 4):
-        from .superres import ampliar
-        return ampliar(img, op.superres)
+def _mejorar(img: np.ndarray, op: OpcionesEstudio, avisos: list[str] | None = None) -> np.ndarray:
+    """Super-resolución opcional (Real-ESRGAN) de una foto individual. Desactivada por
+    defecto; un fallo nunca interrumpe el proceso: se sigue con la foto sin ampliar."""
+    if op.superres not in (2, 4):
+        return img
+    from .superres import ampliar_o_aviso
+    img, aviso = ampliar_o_aviso(img, op.superres)
+    if aviso and avisos is not None and aviso not in avisos:
+        avisos.append(aviso)
     return img
 
 
