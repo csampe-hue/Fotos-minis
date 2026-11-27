@@ -27,6 +27,7 @@ from fotos_minis.composicion import CARRUSEL_AUTO, partes_carrusel
 from fotos_minis.individuales import borrar_individuales, individuales as fotos_individuales, nombre_individual
 from fotos_minis.composicion import caja_sujeto
 from fotos_minis.proceso import cargar, guardar, procesar
+from fotos_minis.superres import ampliar_grupo
 from fotos_minis.segmentacion import MODELO_POR_DEFECTO, MODELOS, mascara_bruta, refinar_mascara
 
 _cache_mascaras: dict[str, tuple[np.ndarray, np.ndarray]] = {}
@@ -135,15 +136,27 @@ def procesar_una(ruta, modelo, huecos, *ajustes, request: gr.Request = None, pro
         suelo_m = mascara_suelo(arr, alfa, op)
         if suelo_m is None:
             gr.Warning("No se distingue el suelo de la pared en esta foto: se usa el suelo de estudio.")
+    if op.nitidez > 0:
+        progress(0.92, desc="Corrigiendo el desenfoque por distancia…")
     out = componer(arr, alfa, op, primer_plano, suelo_mascara=suelo_m)
     # "Antes" con el mismo encuadre que el resultado, para que el comparador coincida.
     ox, oy, W, H = calcular_lienzo(alfa, op, dentro_de_la_foto=suelo_m is not None)
     antes = np.zeros((H, W, 3), np.uint8)
     _pegar(antes, arr, ox, oy)
+    # Foto de grupo («madre»): super-resolución opcional. Las individuales se sacan de
+    # ``out`` sin ampliar (ellas se amplían por su cuenta).
+    grupo = out
+    if op.superres in (2, 4) and op.superres_grupo:
+        progress(0.95, desc="Super-resolución de la foto de grupo…")
+        grupo, aviso_sr = ampliar_grupo(out, op.superres, partes_carrusel(alfa, op))
+        if aviso_sr:
+            gr.Warning(aviso_sr)
+        if grupo.shape != out.shape:
+            antes = np.asarray(Image.fromarray(antes).resize(grupo.shape[1::-1], Image.BICUBIC))
     base = Path(ruta).stem
     temporal = Path(tempfile.mkdtemp())
     destino = temporal / f"{base}_estudio.png"
-    resultado = Image.fromarray(out)
+    resultado = Image.fromarray(grupo)
     resultado.info.update(img.info)
     guardar(resultado, destino)
     guardado = _guardar_copia(destino, destino.name)
@@ -216,7 +229,7 @@ def procesar_una(ruta, modelo, huecos, *ajustes, request: gr.Request = None, pro
 
     mascara = Image.fromarray(np.round(alfa * 255).astype(np.uint8))
     _ultimas_firmas[sesion] = firma
-    return ((Image.fromarray(antes), Image.fromarray(out)), mascara, str(descarga), aviso, galeria,
+    return ((Image.fromarray(antes), resultado), mascara, str(descarga), aviso, galeria,
             individuales)
 
 
@@ -282,6 +295,19 @@ def borrar_perfil(nombre):
     return _opciones_perfil(FABRICA), _estado_perfiles(f"Borrado «{nombre}».")
 
 
+def _grupo_ampliado(r, op: OpcionesEstudio, nombre: str) -> Image.Image:
+    """La foto de grupo del lote, con super-resolución si se ha pedido para ella."""
+    if op.superres not in (2, 4) or not op.superres_grupo:
+        return r.estudio
+    alfa = np.asarray(r.mascara, np.float32) / 255.0
+    arr, aviso = ampliar_grupo(np.asarray(r.estudio), op.superres, partes_carrusel(alfa, op))
+    if aviso:
+        gr.Warning(f"{nombre}: {aviso}")
+    im = Image.fromarray(arr)
+    im.info.update(r.estudio.info)
+    return im
+
+
 def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
     if not ficheros:
         return None, ""
@@ -291,12 +317,13 @@ def procesar_lote(ficheros, modelo, huecos, *ajustes, progress=gr.Progress()):
     with zipfile.ZipFile(zip_path, "w") as z:
         for f in progress.tqdm(ficheros, desc="Procesando"):
             r = procesar(f, op, modelo=modelo, rellenar_huecos_px=int(huecos))
+            estudio = _grupo_ampliado(r, op, Path(f).name)
             nombre = f"{Path(f).stem}_estudio.png"
-            guardar(r.estudio, carpeta / nombre)
+            guardar(estudio, carpeta / nombre)
             z.write(carpeta / nombre, nombre)
-            n = partes_de_imagen(r.estudio) if op.carrusel else 0
+            n = partes_de_imagen(estudio) if op.carrusel else 0
             if n:
-                for i, parte in enumerate(dividir(r.estudio, n), 1):
+                for i, parte in enumerate(dividir(estudio, n), 1):
                     nombre = nombre_parte(Path(f).stem, i, n)
                     guardar(parte, carpeta / nombre)
                     z.write(carpeta / nombre, nombre)
@@ -441,6 +468,9 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                             huecos = gr.Slider(0, 5000, 0, step=50, label="Rellenar huecos de la máscara (px)",
                                                info="Si aparecen agujeros en zonas oscuras de la figura")
                             descontaminar = gr.Checkbox(True, label="Limpiar el color del fondo antiguo en el contorno")
+                            nitidez = gr.Slider(0, 1, 0.0, step=0.05, label="Corregir desenfoque por distancia",
+                                                info="Mide cuánto está desenfocada cada zona de la figura (profundidad "
+                                                     "de campo) y la enfoca en esa medida. 0 = figura intacta")
                         with gr.Tab("Luz", id="luz"):
                             halo = gr.Slider(0, 1, 0.10, step=0.01, label="Foco suave detrás de la figura")
                             vineteado = gr.Slider(0, 1, 0.35, step=0.01, label="Viñeteado")
@@ -491,6 +521,9 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
                                                 info="Desactivada por defecto. Más nitidez en los recortes "
                                                      "pequeños, pero la IA reinterpreta los detalles finos. "
                                                      "Tarda unos segundos por figura; máximo 4096 px")
+                            superres_grupo = gr.Checkbox(False, label="Aplicar también a la foto de grupo y al carrusel",
+                                                         info="Con ×2 o ×4. La foto «madre» suele ser grande: puede "
+                                                              "tardar bastante y nunca pasa de 4096 px")
 
                 # ---------------- Visor ----------------
                 with gr.Column(scale=3, min_width=480):
@@ -528,7 +561,7 @@ with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) a
 
     ajustes = [halo, vineteado, sombra, reflejo, caida, oscurecer, dominante, negro, reencuadrar,
                margen, proporcion, descontaminar, suelo, suelo_ajuste, horizonte, h_distancia, h_desenfoque,
-               h_suelo, h_altura, carrusel, individuales, superres]
+               h_suelo, h_altura, carrusel, individuales, superres, superres_grupo, nitidez]
     entradas = [entrada, modelo, huecos, *ajustes]
     salidas = [comparador, mascara, descarga, guardado, galeria, galeria_ind]
     boton.click(procesar_desde_ui, entradas, salidas)

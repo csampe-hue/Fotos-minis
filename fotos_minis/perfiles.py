@@ -23,6 +23,7 @@ CAMPOS_ESTUDIO = [
     "corregir_dominante", "negro", "reencuadrar", "margen", "proporcion",
     "descontaminar_bordes", "suelo", "suelo_ajuste", "horizonte", "horizonte_distancia", "horizonte_desenfoque",
     "horizonte_suelo", "horizonte_altura", "carrusel", "individuales", "superres",
+    "superres_grupo", "nitidez",
 ]
 CAMPOS = ["modelo", "rellenar_huecos", *CAMPOS_ESTUDIO]
 
@@ -77,6 +78,11 @@ def _sanear(valores: dict) -> dict:
         base["suelo"] = "estudio"
     if base.get("superres") not in (0, 2, 4):
         base["superres"] = 0
+    base["superres_grupo"] = bool(base["superres_grupo"])
+    try:
+        base["nitidez"] = min(max(float(base["nitidez"]), 0.0), 1.0)
+    except (TypeError, ValueError):
+        base["nitidez"] = 0.0
     try:
         base["carrusel"] = int(base["carrusel"]) if int(base["carrusel"]) in (-1, 2, 3, 4, 5, 6) else 0
     except (TypeError, ValueError):

@@ -181,7 +181,7 @@ de «Proporción», o 1:1 si el carrusel está activo).
   son recorte o fondo nuevo), van en el ZIP y en otra prueba se sustituyen. Terminal:
   `--individuales`.
 
-## Super-resolución de las fotos individuales (opcional)
+## Super-resolución (opcional)
 
 Las fotos individuales son recortes de la foto de grupo, así que una figura pequeña puede
 quedar con pocos píxeles y verse borrosa al ampliarla. La super-resolución las amplía ×2 o
@@ -190,15 +190,20 @@ quedar con pocos píxeles y verse borrosa al ampliarla. La super-resolución las
 
 ![Antes y después de la super-resolución ×4 en un recorte de 165×175 px](docs/superres/antes_despues.jpg)
 
-**Está desactivada por defecto** y sólo afecta a las fotos individuales (la foto de grupo y
-el carrusel no cambian).
+**Está desactivada por defecto.** Se aplica a las fotos individuales y, si marcas
+**Aplicar también a la foto de grupo y al carrusel**, también a la foto «madre» (la de
+grupo, `<nombre>_estudio.png`) y a las partes de su carrusel, que siguen siendo cuadrados
+exactos. Las individuales se sacan siempre de la foto de grupo sin ampliar, así que nunca se
+amplían dos veces. Una foto de grupo de móvil suele medir ya cerca de 4096 px: en ese caso
+no se amplía y se avisa (para ella sirve más la corrección de nitidez del apartado
+siguiente).
 
 | Dónde | Cómo |
 |---|---|
 | Aplicación | Pestaña «Encuadre» → marca **Fotos individuales** y elige **×2** o **×4** en «Super-resolución (IA)» |
-| Terminal | `python -m fotos_minis foto.jpg --individuales --superres 2` (`--superres 0` la desactiva aunque el perfil la tenga activada) |
+| Terminal | `python -m fotos_minis foto.jpg --individuales --superres 2` (`--superres 0` la desactiva aunque el perfil la tenga activada); añade `--superres-grupo` para la foto de grupo |
 | Python | `individuales(salida, alfa, OpcionesEstudio(superres=2), imagen, avisos=lista)`; los avisos de fallo quedan en `lista` |
-| Perfiles | Se guarda con el resto de ajustes (`"superres": 0, 2 o 4`) |
+| Perfiles | Se guarda con el resto de ajustes (`"superres": 0, 2 o 4`, `"superres_grupo": true/false`) |
 
 Qué conviene saber:
 
@@ -214,6 +219,29 @@ Qué conviene saber:
 - **Si algo falla** (falta el modelo, no carga, sin memoria…), la foto se guarda **sin
   ampliar** y se avisa: en la aplicación con un aviso emergente, en la terminal con una
   línea `aviso:` y en `~/.fotos-minis/app.log` (app de Mac). El resto del proceso sigue.
+
+## Corregir el desenfoque por distancia (opcional)
+
+Con poca profundidad de campo no toda la miniatura está igual de enfocada: la cabeza puede
+estar borrosa y la peana nítida, o la figura de delante nítida y la de detrás no. Un enfoque
+uniforme (o la super-resolución, que trata toda la imagen igual) no lo resuelve: exagera lo
+que ya era nítido y deja borroso lo que más lo está.
+
+**Corregir desenfoque por distancia** (pestaña «Recorte», de 0 a 1) mide en cada borde de la
+figura cuánto está desenfocado y lo extiende a toda ella, de modo que cada zona se enfoca en
+la medida de su propio desenfoque (deconvolución variable, con límite para no crear halos).
+Sólo cambia la figura (el fondo se sustituye igualmente) y afecta a la foto de grupo, al
+carrusel y a las individuales. Si además activas la super-resolución, se aplica antes que
+ella, así la IA parte de una imagen con el desenfoque ya igualado.
+
+![Desenfoque que crece hacia arriba: enfoque uniforme frente a corrección según la distancia](docs/nitidez/antes_despues.jpg)
+
+- **Desactivada por defecto (0)**: con ella la figura deja de ser bit a bit la original.
+- Recupera bien desenfoques moderados (hasta 2-3 px); lo muy desenfocado mejora, pero no se
+  puede reconstruir del todo (ver la cabeza en la imagen).
+- Tarda poco (≈0,1 s en un recorte pequeño, ≈2 s en una figura que ocupa media foto de
+  móvil) y se calcula una vez por foto aunque muevas otros controles.
+- Terminal: `--nitidez 0.8`. Python: `OpcionesEstudio(nitidez=0.8)`. Se guarda en los perfiles.
 
 ## Perfiles de ajustes
 

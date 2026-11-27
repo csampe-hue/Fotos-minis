@@ -23,7 +23,7 @@ OPCIONES = {
     "horizonte_altura": "horizonte_altura", "oscurecer_borde": "oscurecer_borde",
     "corregir_dominante": "corregir_dominante", "negro": "negro", "margen": "margen",
     "proporcion": "proporcion", "suelo": "suelo", "suelo_ajuste": "suelo_ajuste",
-    "carrusel": "carrusel",
+    "carrusel": "carrusel", "nitidez": "nitidez",
 }
 
 
@@ -67,6 +67,11 @@ def main(argv=None) -> None:
     p.add_argument("--superres", type=int, choices=[0, 2, 4],
                    help="super-resolución (IA) ×2 o ×4 de las fotos individuales "
                         "(desactivada por defecto; 0 la desactiva aunque el perfil la active)")
+    p.add_argument("--superres-grupo", action="store_true",
+                   help="con --superres, amplía también la foto de grupo («madre») y su carrusel")
+    p.add_argument("--nitidez", type=float, metavar="0-1",
+                   help="corrige el desenfoque por distancia (profundidad de campo) de cada zona "
+                        "de la figura (0 = desactivado)")
     p.add_argument("--sin-reencuadre", action="store_true", help="mantiene el tamaño original")
     p.add_argument("--rellenar-huecos", type=int, metavar="PX",
                    help="rellena huecos interiores de la máscara menores de PX píxeles")
@@ -98,6 +103,8 @@ def main(argv=None) -> None:
         valores["individuales"] = True
     if a.superres is not None:
         valores["superres"] = a.superres
+    if a.superres_grupo:
+        valores["superres_grupo"] = True
     if a.sin_reencuadre:
         valores["reencuadrar"] = False
     op, modelo, huecos = perfiles.a_opciones(valores)
@@ -114,14 +121,26 @@ def main(argv=None) -> None:
     for i, f in enumerate(ficheros, 1):
         print(f"[{i}/{len(ficheros)}] {f}", flush=True)
         r = procesar(f, op, modelo=modelo, rellenar_huecos_px=huecos)
+        estudio = r.estudio
+        if op.superres in (2, 4) and op.superres_grupo:
+            import numpy as np
+            from PIL import Image
+            from .composicion import partes_carrusel
+            from .superres import ampliar_grupo
+            alfa = np.asarray(r.mascara, np.float32) / 255.0
+            arr, aviso = ampliar_grupo(np.asarray(r.estudio), op.superres, partes_carrusel(alfa, op))
+            if aviso:
+                print(f"    aviso: {aviso}", file=sys.stderr)
+            estudio = Image.fromarray(arr)
+            estudio.info.update(r.estudio.info)
         destino = a.salida / f"{f.stem}_estudio.jpg"
-        guardar(r.estudio, destino, quality=a.calidad, subsampling=0)
+        guardar(estudio, destino, quality=a.calidad, subsampling=0)
         from .carrusel import borrar_partes, dividir, nombre_parte, partes_de_imagen
-        n = partes_de_imagen(r.estudio) if op.carrusel else 0
+        n = partes_de_imagen(estudio) if op.carrusel else 0
         if n:
             borrar_partes(a.salida, f.stem)
             print(f"    carrusel de {n} partes")
-            for i, parte in enumerate(dividir(r.estudio, n), 1):
+            for i, parte in enumerate(dividir(estudio, n), 1):
                 guardar(parte, a.salida / nombre_parte(f.stem, i, n, ".jpg"),
                         quality=a.calidad, subsampling=0)
         from .individuales import borrar_individuales, individuales, nombre_individual

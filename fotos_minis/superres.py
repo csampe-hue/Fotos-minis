@@ -1,7 +1,8 @@
 """Super-resolución opcional con Real-ESRGAN (realesr-general-x4v3, ONNX).
 
 Aumenta la resolución de las fotos individuales, que al ser recortes de la foto de
-grupo pueden quedar pequeñas y borrosas. Está **desactivada por defecto**
+grupo pueden quedar pequeñas y borrosas, y opcionalmente también la de la foto de grupo
+(«madre», ``OpcionesEstudio.superres_grupo``). Está **desactivada por defecto**
 (``OpcionesEstudio.superres = 0``): sólo se aplica si se pide ×2 o ×4.
 
 El modelo amplía ×4. Para ×2 cada tesela ×4 se reduce a la mitad con un filtro de área
@@ -140,3 +141,22 @@ def ampliar_o_aviso(img: np.ndarray, factor: int) -> tuple[np.ndarray, str | Non
     except ErrorSuperres as e:
         log.warning("Super-resolución desactivada para esta imagen: %s", e, exc_info=e.__cause__ is not None)
         return img, f"No se pudo aplicar la super-resolución ({e}); se guarda sin ampliar."
+
+
+def ampliar_grupo(img: np.ndarray, factor: int, partes: int = 0) -> tuple[np.ndarray, str | None]:
+    """Super-resolución de la foto de grupo («madre»), sin lanzar: (imagen, aviso).
+
+    Con ``partes`` > 0 (carrusel) el resultado mide exactamente ``partes`` × alto de
+    ancho, para que se pueda seguir cortando en cuadrados. Si la foto ya es tan grande
+    que el tope de ``LADO_MAXIMO`` no deja ampliarla, se devuelve tal cual con un aviso.
+    """
+    if factor not in (2, 4):
+        return img, None
+    if factor_efectivo(img.shape, factor) < FACTOR_MINIMO:
+        return img, (f"La foto de grupo ya mide {max(img.shape[:2])} px: no se amplía "
+                     f"(máximo {LADO_MAXIMO} px). La super-resolución sólo se aplica a las individuales.")
+    res, aviso = ampliar_o_aviso(img, factor)
+    if partes and res is not img and res.shape[1] != partes * res.shape[0]:
+        h = res.shape[0]
+        res = cv2.resize(res, (partes * h, h), interpolation=cv2.INTER_AREA)
+    return res, aviso
