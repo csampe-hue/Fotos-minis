@@ -45,7 +45,11 @@ class OpcionesEstudio:
     margen: float = 0.12            # margen alrededor del sujeto (fracción del lado mayor)
     proporcion: str = "original"    # "original", "1:1", "4:5", "3:2", "2:3", "16:9"
     individuales: bool = False      # además, una foto recortada por figura (si hay varias)
-    superres: int = 0               # super-resolución (IA) de las fotos individuales: 0, 2 o 4
+    superres: int = 0               # super-resolución (IA): 0, 2 o 4 (fotos individuales)
+    superres_grupo: bool = False    # aplicarla también a la foto de grupo («madre») y su carrusel
+    # Nitidez: corrige el desenfoque por distancia (profundidad de campo), distinto en
+    # cada zona de la figura. 0 = desactivada (la figura es bit a bit la original).
+    nitidez: float = 0.0
     carrusel: int = 0               # 2 a 6: imagen N:1 para dividir en N cuadrados (Instagram);
                                     # -1 = automático (el N con el que las minis ocupan más área)
 
@@ -510,6 +514,9 @@ def componer(imagen: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio,
     pasar la máscara del suelo real ya calculada (modo "original").
     """
     alfa = alfa.astype(np.float32)
+    if op.nitidez > 0:
+        from .nitidez import aplicar
+        imagen, primer_plano = aplicar(imagen, alfa, op.nitidez, primer_plano)
     if op.suelo == "original":
         if suelo_mascara is None:
             suelo_mascara = mascara_suelo(imagen, alfa, op)
@@ -579,7 +586,8 @@ def componer(imagen: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio,
     out = np.round(salida * 255).astype(np.uint8)
 
     # Garantía de fidelidad: el interior opaco del sujeto es bit a bit el original
-    # (salvo que se haya pedido corregir la dominante de color).
+    # (salvo que se haya pedido corregir la dominante de color; con «nitidez», el
+    # original ya restaurado).
     if op.corregir_dominante <= 0:
         orig = np.zeros((H, W, 3), np.uint8)
         _pegar(orig, imagen, ox, oy)

@@ -353,7 +353,12 @@ def individuales(salida: np.ndarray, alfa: np.ndarray, op: OpcionesEstudio, imag
             break
     clave = proporcion_objetivo(op, alfa)
     prop = PROPORCIONES.get(clave) or (alfa.shape[1] / alfa.shape[0])
-    op_ind = replace(op, carrusel=0, individuales=False, proporcion=clave, reencuadrar=True)
+    if op.nitidez > 0:
+        # Se restaura una vez con la máscara de todas las figuras (como en la foto de
+        # grupo) y no otra vez por figura.
+        from .nitidez import aplicar
+        imagen, primer_plano = aplicar(imagen, alfa, op.nitidez, primer_plano)
+    op_ind = replace(op, carrusel=0, individuales=False, proporcion=clave, reencuadrar=True, nitidez=0.0)
     total = alfa > 0.5
     res = []
     for m in mascaras:
