@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 
 from .composicion import (PROPORCIONES, OpcionesEstudio, _pegar, caja_sujeto, calcular_lienzo,
-                          mascara_peanas, partes_carrusel, peanas)
+                          geometria_peana, mascara_peanas, partes_carrusel, piezas_apoyadas)
 
 
 @dataclass
@@ -55,10 +55,16 @@ def estimar_peana(alfa: np.ndarray) -> tuple[float, float] | None:
     for t in tramos:
         if len(t) < 6:
             continue
-        perfil = cv2.GaussianBlur(fondo[t].reshape(1, -1), (0, 0), max(len(t) / 200, 1.0)).ravel()
+        sigma = max(len(t) / 200, 1.0)
+        perfil = cv2.GaussianBlur(fondo[t].reshape(1, -1), (0, 0), sigma).ravel()
         rango = perfil.max() - perfil.min()
         muescas, _ = find_peaks(-perfil, prominence=max(0.25 * rango, 2.0), distance=max(len(t) // 20, 3))
-        cortes = [0, *muescas.tolist(), len(t) - 1]
+        # Escalones: donde una peana delantera termina y asoma una de detrás, el borde
+        # salta de golpe hacia arriba (no forma muesca). También se corta allí.
+        k = max(3, int(round(2 * sigma)))                      # el suavizado reparte el salto
+        salto = np.abs(perfil[2 * k:] - perfil[:-2 * k])
+        escalones, _ = find_peaks(salto, height=max(0.2 * rango, 6.0), distance=k + 1)
+        cortes = sorted({0, *muescas.tolist(), *(escalones + k).tolist(), len(t) - 1})
         for i0, i1 in zip(cortes[:-1], cortes[1:]):
             if i1 - i0 < 6:
                 continue
@@ -67,6 +73,9 @@ def estimar_peana(alfa: np.ndarray) -> tuple[float, float] | None:
             arcos.append((i1 - i0, max(profundidad, 1.0)))
     if not arcos:
         return None
+    # Los trozos muy cortos (esquinas, un pico de peana asomando) no informan del ancho.
+    largo = max(a for a, _ in arcos)
+    arcos = [(a, p) for a, p in arcos if a >= 0.3 * largo]
     anchos = np.array([a for a, _ in arcos], np.float32)
     # Los arcos de peanas tapadas en parte son más cortos: se toman los más largos.
     ancho = float(np.percentile(anchos, 75))
@@ -81,16 +90,47 @@ def localizar_peanas(alfa: np.ndarray) -> list[tuple[float, float, float, float]
     Las peanas son elipses de tamaño conocido. Se colocan de una en una donde cubren
     más superficie de peana todavía sin explicar (cobertura voraz) y se para cuando
     una nueva elipse apenas aporta nada.
+
+    Se trabaja por piezas de la silueta (sin lanzas ni otras estructuras finas, que
+    pueden unir figuras separadas): cada pieza grande mide su propio tamaño de peana,
+    así que en una foto con peanas de 25 y de 50 mm separadas cada una se mide bien.
+    Las piezas pequeñas usan el tamaño típico del resto.
     """
-    lista = peanas(alfa)
-    # Dos estimaciones del tamaño de una peana que fallan en casos opuestos (piezas
-    # sueltas de la silueta / arcos del borde inferior). Cuando fallan es porque juntan
-    # varias peanas en una, así que la menor es la buena.
-    estimada = estimar_peana(alfa)
-    if estimada is not None and estimada[0] < float(np.median([g["ancho"] for g in lista])):
-        ancho_e, vertical_e = estimada
-        lista = [{"ancho": ancho_e, "inclinacion": vertical_e / (ancho_e / 2)}]
-    mascara, ancho, vertical = mascara_peanas(alfa, lista)
+    piezas = piezas_apoyadas(alfa)
+    if not piezas:
+        return []
+    areas = [p.sum() for p in piezas]
+    tamanos = []
+    for p in piezas:
+        a_p = np.where(p, alfa, 0).astype(np.float32)
+        g = geometria_peana(a_p)
+        ancho, incl = g["ancho"], g["inclinacion"]
+        # Dos estimaciones del tamaño de una peana que fallan en casos opuestos (pieza
+        # entera / arcos del borde inferior). Cuando fallan es porque juntan varias
+        # peanas en una, así que la menor es la buena.
+        estimada = estimar_peana(a_p)
+        if estimada is not None and estimada[0] < ancho:
+            ancho, incl = estimada[0], estimada[1] / (estimada[0] / 2)
+        tamanos.append((ancho, incl))
+    tipico = (float(np.median([t[0] for t in tamanos])), float(np.median([t[1] for t in tamanos])))
+    elegidas = []
+    for p, area, t in zip(piezas, areas, tamanos):
+        if area < 0.15 * max(areas):
+            t = tipico
+        elegidas += _cubrir(np.where(p, alfa, 0).astype(np.float32), *t)
+    return _descartar_falsas(elegidas, alfa)
+
+
+def _cubrir(alfa: np.ndarray, ancho: float, inclinacion: float) -> list[tuple[float, float, float, float]]:
+    """Cobertura voraz de las peanas de una pieza con elipses del tamaño dado."""
+    ys, xs = np.nonzero(alfa > 0.5)
+    if len(ys) == 0:
+        return []
+    h_, w_ = alfa.shape
+    pad = int(ancho) + 4
+    y0, y1 = max(ys.min() - pad, 0), min(ys.max() + pad + 1, h_)
+    x0, x1 = max(xs.min() - pad, 0), min(xs.max() + pad + 1, w_)
+    mascara, ancho, vertical = mascara_peanas(alfa[y0:y1, x0:x1], [{"ancho": ancho, "inclinacion": inclinacion}])
     if not mascara.any():
         return []
     # Escala de trabajo: peanas de unos 40 px de ancho.
@@ -102,20 +142,27 @@ def localizar_peanas(alfa: np.ndarray) -> list[tuple[float, float, float, float]
     nucleo = _elipse(a, b)
     area = nucleo.sum()
     restante = m.copy()
+    # Dos peanas redondas no pueden ocupar el mismo sitio en la mesa: en la imagen sus
+    # centros distan al menos dos semiejes (en la escala de cada eje). Se prohíben los
+    # centros a menos de 1,6 semiejes de una peana ya colocada (margen para el error
+    # de medida). Evita peanas fantasma en una capa o un manto que llega a la peana.
+    prohibido = np.zeros_like(m)
     elegidas = []
     for _ in range(40):
         gana = cv2.filter2D(restante, -1, nucleo, borderType=cv2.BORDER_CONSTANT)
         cubre = cv2.filter2D(m, -1, nucleo, borderType=cv2.BORDER_CONSTANT)
         # Sólo centros donde la elipse está mayoritariamente sobre peana (oclusión parcial admitida).
         gana[cubre < 0.55 * area] = 0
+        gana[prohibido > 0] = 0
         y, x = np.unravel_index(int(np.argmax(gana)), gana.shape)
         if gana[y, x] < 0.35 * area:
             break
-        elegidas.append((x / s, y / s, ancho / 2, vertical))
+        elegidas.append((x / s + x0, y / s + y0, ancho / 2, vertical))
         borrar = np.zeros_like(restante)
         cv2.ellipse(borrar, (int(x), int(y)), (max(int(a * 1.05), 1), max(int(b * 1.05), 1)), 0, 0, 360, 1.0, -1)
         restante *= 1 - borrar
-    return _descartar_falsas(elegidas, alfa)
+        cv2.ellipse(prohibido, (int(x), int(y)), (max(int(a * 1.6), 1), max(int(b * 1.6), 1)), 0, 0, 360, 1.0, -1)
+    return elegidas
 
 
 def _descartar_falsas(bases, alfa):

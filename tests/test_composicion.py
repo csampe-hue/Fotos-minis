@@ -104,3 +104,15 @@ def test_interior_semitransparente_se_vuelve_opaco():
     r = refinar_mascara(img, alfa, refinar_bordes=False)
     assert r[100:200, 100:140].min() == 1.0   # interior opaco
     assert r[0:5, 0:5].max() == 0.0           # el fondo sigue siendo fondo
+
+
+def test_lanza_apoyada_en_el_suelo_no_ensancha_la_peana():
+    import cv2
+    alfa = np.zeros((420, 720), np.float32)
+    yy, xx = np.mgrid[0:420, 0:720]
+    alfa[(np.abs(xx - 360) < 14) & (yy > 220) & (yy < 330)] = 1
+    alfa[((xx - 360) / 60) ** 2 + ((yy - 330) / 16) ** 2 <= 1] = 1
+    cv2.line(alfa, (250, 345), (470, 120), 1, 5)                  # lanza en diagonal hasta el suelo
+    g = geometria_peana(alfa)
+    assert abs(g["cx"] - 360) <= 3 and abs(g["ancho"] - 120) <= 6
+    assert 0.2 <= g["inclinacion"] <= 0.34                         # b/a = 16/60
