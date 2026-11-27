@@ -172,13 +172,44 @@ de «Proporción», o 1:1 si el carrusel está activo).
   **recorta** de ella. Si no, esa figura se **vuelve a componer sola con un fondo nuevo**
   (mismo fondo, suelo y luz; se reutiliza su máscara, no se segmenta otra vez).
 - Las figuras casi ocultas tras otras no pueden mostrarse enteras: se omiten y se avisa.
-- **Super-resolución (IA)** opcional, ×2 o ×4 (máximo 4096 px): amplía las fotos individuales
-  con Real-ESRGAN para que los recortes pequeños no queden borrosos. Tarda unos segundos por
-  figura en CPU. Ojo: al ser IA, reinterpreta los detalles más finos (la figura ya no es
-  píxel a píxel la original); por eso es opcional. Terminal: `--superres 2`.
+- **Super-resolución (IA)** opcional: ver el apartado siguiente.
 - Con una sola figura no se genera nada. Se ven en la pestaña **Individuales** (indicando si
   son recorte o fondo nuevo), van en el ZIP y en otra prueba se sustituyen. Terminal:
   `--individuales`.
+
+## Super-resolución de las fotos individuales (opcional)
+
+Las fotos individuales son recortes de la foto de grupo, así que una figura pequeña puede
+quedar con pocos píxeles y verse borrosa al ampliarla. La super-resolución las amplía ×2 o
+×4 con [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (modelo
+`realesr-general-x4v3`, incluido en `recursos/modelos/`, sin descargas).
+
+![Antes y después de la super-resolución ×4 en un recorte de 165×175 px](docs/superres/antes_despues.jpg)
+
+**Está desactivada por defecto** y sólo afecta a las fotos individuales (la foto de grupo y
+el carrusel no cambian).
+
+| Dónde | Cómo |
+|---|---|
+| Aplicación | Pestaña «Encuadre» → marca **Fotos individuales** y elige **×2** o **×4** en «Super-resolución (IA)» |
+| Terminal | `python -m fotos_minis foto.jpg --individuales --superres 2` (`--superres 0` la desactiva aunque el perfil la tenga activada) |
+| Python | `individuales(salida, alfa, OpcionesEstudio(superres=2), imagen, avisos=lista)`; los avisos de fallo quedan en `lista` |
+| Perfiles | Se guarda con el resto de ajustes (`"superres": 0, 2 o 4`) |
+
+Qué conviene saber:
+
+- **Fidelidad**: al ser IA, reinterpreta los detalles más finos (texturas de la pintura,
+  bordes): la figura deja de ser píxel a píxel la original. Por eso es opcional; úsala
+  cuando el recorte sea pequeño, no en fotos que ya tienen buena resolución.
+- **Tamaño máximo**: el lado mayor del resultado no pasa de **4096 px**. Si ×2 o ×4 se
+  pasaría, se amplía sólo hasta ese tope; si la foto ya mide casi 4096 px (factor < 1,05),
+  se deja como está.
+- **Tiempo y memoria (CPU)**: se procesa por teselas de 256 px, unos 0,2-0,4 s por tesela
+  (≈20 s para un recorte de 1500 px a ×2). La memoria extra se queda en torno a
+  100-150 MB incluso en el caso más grande, porque la imagen ×4 nunca se guarda entera.
+- **Si algo falla** (falta el modelo, no carga, sin memoria…), la foto se guarda **sin
+  ampliar** y se avisa: en la aplicación con un aviso emergente, en la terminal con una
+  línea `aviso:` y en `~/.fotos-minis/app.log` (app de Mac). El resto del proceso sigue.
 
 ## Perfiles de ajustes
 

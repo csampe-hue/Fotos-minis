@@ -64,8 +64,9 @@ def main(argv=None) -> None:
                         "(auto: el N con el que las minis ocupan más área)")
     p.add_argument("--individuales", action="store_true",
                    help="si hay varias figuras, guarda además una foto recortada de cada una")
-    p.add_argument("--superres", type=int, choices=[2, 4],
-                   help="super-resolución (IA) ×2 o ×4 de las fotos individuales")
+    p.add_argument("--superres", type=int, choices=[0, 2, 4],
+                   help="super-resolución (IA) ×2 o ×4 de las fotos individuales "
+                        "(desactivada por defecto; 0 la desactiva aunque el perfil la active)")
     p.add_argument("--sin-reencuadre", action="store_true", help="mantiene el tamaño original")
     p.add_argument("--rellenar-huecos", type=int, metavar="PX",
                    help="rellena huecos interiores de la máscara menores de PX píxeles")
@@ -95,7 +96,7 @@ def main(argv=None) -> None:
             valores[campo] = getattr(a, opcion)
     if a.individuales:
         valores["individuales"] = True
-    if a.superres:
+    if a.superres is not None:
         valores["superres"] = a.superres
     if a.sin_reencuadre:
         valores["reencuadrar"] = False
@@ -129,8 +130,11 @@ def main(argv=None) -> None:
         if op.individuales:
             import numpy as np
             from PIL import Image
+            avisos: list[str] = []
             lista, tapadas = individuales(np.asarray(r.estudio), np.asarray(r.mascara, np.float32) / 255.0,
-                                          op, np.asarray(cargar(f)))
+                                          op, np.asarray(cargar(f)), avisos=avisos)
+            for aviso in avisos:
+                print(f"    aviso: {aviso}", file=sys.stderr)
             trozos = [im for im, _ in lista]
             if trozos:
                 print(f"    {len(trozos)} fotos individuales" + (f" ({tapadas} figuras casi ocultas omitidas)" if tapadas else ""))
