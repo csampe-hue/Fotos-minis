@@ -420,12 +420,121 @@ CSS = """
 #comparador .content, #comparador .content img,
 #mascara .image-container, #mascara img { height: 100% !important; max-height: none !important; }
 #comparador img, #mascara img { width: 100% !important; object-fit: contain; }
+/* Pantalla completa: Gradio fija el bloque sobre toda la ventana, pero la altura del
+   visor de arriba seguía mandando y sólo se cubría la parte superior. */
+#comparador.fullscreen, #mascara.fullscreen, #galeria.fullscreen, #galeria-ind.fullscreen {
+  inset: 0 !important; width: 100vw !important; height: 100vh !important; max-height: none !important;
+}
+.fullscreen .slider-wrap, .fullscreen .slider-wrap > .wrap { height: 100% !important; max-height: none !important; }
+.fullscreen img { max-height: none !important; }
+#mascara.fullscreen .image-container, #mascara.fullscreen .image-container > button,
+#mascara.fullscreen .image-frame { height: 100% !important; width: 100% !important; }
+#mascara.fullscreen .image-frame img { width: 100% !important; height: 100% !important; object-fit: contain; }
+#galeria.fullscreen .preview, #galeria-ind.fullscreen .preview { height: 100% !important; }
+#galeria.fullscreen .media-button img, #galeria-ind.fullscreen .media-button img {
+  width: 100% !important; height: 100% !important; object-fit: contain; }
+/* Zoom con la rueda (ver ZOOM_PANTALLA_COMPLETA). */
+.fullscreen .media-button, .fullscreen .image-frame { overflow: hidden !important; }
+.fullscreen img.fm-zoom { transform-origin: 0 0; will-change: transform; }
+.fullscreen img.fm-zoom.fm-ampliada { cursor: grab; }
+.fullscreen img.fm-zoom.fm-arrastrando { cursor: grabbing; }
 @media (max-width: 960px) {
   #cabecera { flex-wrap: wrap !important; }
   #titulo { flex: 1 1 100% !important; min-width: 100% !important; }
   #panel { position: static; max-height: none; overflow: visible; }
   #comparador, #mascara, #galeria, #galeria-ind { height: 70vh !important; }
 }
+"""
+
+# En pantalla completa, la rueda del ratón amplía la máscara y las fotos de las galerías
+# hacia el punto del cursor, y con la imagen ampliada se arrastra para moverla. Un clic sin
+# arrastrar sigue pasando a la siguiente foto de la galería. (El comparador antes/después
+# ya trae su propio zoom de Gradio.)
+ZOOM_PANTALLA_COMPLETA = """
+<script>
+(() => {
+  if (window.__fmZoom) return;
+  window.__fmZoom = true;
+  const SEL = '.block.fullscreen .media-button img, .block.fullscreen .image-frame img';
+  const MAX = 15, UMBRAL = 4;
+  const estado = new WeakMap();
+  const de = (img) => estado.get(img) || {s: 1, x: 0, y: 0};
+  function aplicar(img, e) {
+    // Sin salirse: la imagen ampliada siempre cubre el hueco que ocupaba.
+    const w = img.offsetWidth, h = img.offsetHeight;
+    if (e.s <= 1) { e.s = 1; e.x = 0; e.y = 0; }
+    e.x = Math.min(0, Math.max(w * (1 - e.s), e.x));
+    e.y = Math.min(0, Math.max(h * (1 - e.s), e.y));
+    estado.set(img, e);
+    img.classList.add('fm-zoom');
+    img.classList.toggle('fm-ampliada', e.s > 1);
+    img.style.transform = e.s > 1 ? `translate(${e.x}px, ${e.y}px) scale(${e.s})` : '';
+  }
+  function reiniciar(img) { estado.delete(img); img.style.transform = ''; img.classList.remove('fm-ampliada'); }
+  function reiniciarTodas() { document.querySelectorAll('img.fm-zoom').forEach(reiniciar); }
+  // Posición del cursor respecto a la esquina de la imagen sin transformar.
+  function local(img, ev) {
+    const r = img.getBoundingClientRect(), e = de(img);
+    return [ev.clientX - (r.left - e.x), ev.clientY - (r.top - e.y)];
+  }
+  document.addEventListener('wheel', (ev) => {
+    const img = ev.target.closest && ev.target.closest(SEL);
+    if (!img) return;
+    ev.preventDefault();
+    const e = de(img), [px, py] = local(img, ev);
+    const s = Math.min(MAX, Math.max(1, e.s * Math.exp(-ev.deltaY * 0.0015)));
+    e.x = px - (px - e.x) * s / e.s;
+    e.y = py - (py - e.y) * s / e.s;
+    e.s = s;
+    aplicar(img, e);
+  }, {passive: false, capture: true});
+  let arrastre = null, anularClic = false;
+  document.addEventListener('pointerdown', (ev) => {
+    const img = ev.button === 0 && ev.target.closest && ev.target.closest(SEL);
+    anularClic = false;
+    if (!img || de(img).s <= 1) return;
+    const e = de(img);
+    arrastre = {img, x0: ev.clientX, y0: ev.clientY, ex: e.x, ey: e.y, movido: false};
+  }, true);
+  document.addEventListener('pointermove', (ev) => {
+    if (!arrastre) return;
+    const dx = ev.clientX - arrastre.x0, dy = ev.clientY - arrastre.y0;
+    if (!arrastre.movido && Math.hypot(dx, dy) < UMBRAL) return;
+    arrastre.movido = true;
+    arrastre.img.classList.add('fm-arrastrando');
+    ev.preventDefault();
+    const e = de(arrastre.img);
+    e.x = arrastre.ex + dx; e.y = arrastre.ey + dy;
+    aplicar(arrastre.img, e);
+  }, true);
+  document.addEventListener('pointerup', () => {
+    if (!arrastre) return;
+    anularClic = arrastre.movido;
+    arrastre.img.classList.remove('fm-arrastrando');
+    arrastre = null;
+  }, true);
+  // Tras arrastrar, el clic que genera el navegador no debe pasar a la foto siguiente.
+  document.addEventListener('click', (ev) => {
+    if (anularClic) { anularClic = false; ev.stopPropagation(); ev.preventDefault(); }
+  }, true);
+  document.addEventListener('dragstart', (ev) => {
+    if (ev.target.closest && ev.target.closest(SEL)) ev.preventDefault();
+  }, true);
+  // Una foto nueva (otra de la galería) y entrar o salir de pantalla completa empiezan sin zoom.
+  document.addEventListener('load', (ev) => {
+    if (ev.target.tagName === 'IMG' && ev.target.classList.contains('fm-zoom')) reiniciar(ev.target);
+  }, true);
+  new MutationObserver((cambios) => {
+    for (const c of cambios) {
+      if (c.attributeName === 'src' && c.target.classList.contains('fm-zoom')) reiniciar(c.target);
+      if (c.attributeName === 'class' && c.target.classList.contains('block')
+          && c.oldValue && c.oldValue.includes('fullscreen') !== c.target.classList.contains('fullscreen'))
+        c.target.querySelectorAll('img.fm-zoom').forEach(reiniciar);
+    }
+  }).observe(document.documentElement, {subtree: true, attributes: true,
+                                         attributeFilter: ['src', 'class'], attributeOldValue: true});
+})();
+</script>
 """
 
 with gr.Blocks(title="Fotos Minis · Fondo negro de estudio", fill_width=True) as demo:
@@ -601,4 +710,4 @@ if __name__ == "__main__":
     # Las texturas de suelo se generan en segundo plano para que el primer uso sea inmediato.
     from fotos_minis.suelo import precargar
     threading.Thread(target=precargar, daemon=True).start()
-    demo.queue(default_concurrency_limit=1).launch(css=CSS)
+    demo.queue(default_concurrency_limit=1).launch(css=CSS, head=ZOOM_PANTALLA_COMPLETA)

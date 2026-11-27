@@ -38,7 +38,7 @@ def arrancar_servidor():
 
     threading.Thread(target=precargar, daemon=True).start()
     app.demo.queue(default_concurrency_limit=1).launch(
-        css=app.CSS, server_port=PUERTO, inbrowser=False, prevent_thread_lock=True, quiet=True)
+        css=app.CSS, head=app.ZOOM_PANTALLA_COMPLETA, server_port=PUERTO, inbrowser=False, prevent_thread_lock=True, quiet=True)
     return app
 
 
